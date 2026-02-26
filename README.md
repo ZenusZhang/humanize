@@ -10,12 +10,12 @@
 
 The name can also be interpreted as **Reinforcement Learning with Code Review** - reflecting the iterative improvement cycle where AI-generated code is continuously refined through external review feedback.
 
-A Claude Code plugin that provides iterative development with Codex review. Humanize creates a feedback loop where the execution agent (Claude or Codex, based on plan type) implements your plan while Codex independently reviews the work.
+A Claude Code plugin that provides iterative development with Codex review. Humanize creates a feedback loop where Claude implements your plan while Codex independently reviews the work, ensuring quality through continuous refinement.
 
 ## Core Philosophy
 
 **Iteration over Perfection**: Instead of expecting perfect output in one shot, Humanize leverages an iterative feedback loop where:
-- Claude or Codex implements your plan (based on plan type)
+- Claude implements your plan
 - Codex independently reviews progress
 - Issues are caught and addressed early
 - Work continues until all acceptance criteria are met
@@ -99,7 +99,7 @@ HUMANIZE_CODEX_BYPASS_SANDBOX=true claude --plugin-dir /path/to/humanize
 
 ```mermaid
 flowchart LR
-    Plan["Your Plan<br/>(plan.md)"] --> Claude["Executor (Claude/Codex)<br/>Implements & Summarizes"]
+    Plan["Your Plan<br/>(plan.md)"] --> Claude["Claude Implements<br/>& Summarizes"]
     Claude --> Codex["Codex Reviews<br/>Summary"]
     Codex -->|Feedback Loop| Claude
     Codex -->|COMPLETE| Review["Code Review<br/>(codex review)"]
@@ -108,9 +108,7 @@ flowchart LR
 ```
 
 The loop has two phases:
-1. **Implementation Phase**: execution agent works, Codex reviews summaries until COMPLETE
-   - `coding` plan: Claude executes tasks
-   - `design` plan: Codex executes tasks (via ask-codex workflow)
+1. **Implementation Phase**: Claude works, Codex reviews summaries until COMPLETE
 2. **Review Phase**: `codex review --base <branch>` checks code quality with `[P0-9]` severity markers
 
 ### Quick Start
@@ -151,7 +149,6 @@ The loop has two phases:
 
 OPTIONS:
   --plan-file <path>     Explicit plan file path (alternative to positional arg)
-  --plan-type <TYPE>     Plan routing type: coding or design (default: auto-detect, fallback coding)
   --max <N>              Maximum iterations before auto-stop (default: 42)
   --codex-model <MODEL:EFFORT>
                          Codex model and reasoning effort (default: gpt-5.3-codex:xhigh)

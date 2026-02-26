@@ -58,7 +58,6 @@ TEST_SUITES=(
     "test-session-id.sh"
     "test-agent-teams.sh"
     "test-worktree-teams.sh"
-    "test-plan-type-routing.sh"
     # Ask Codex tests
     "test-ask-codex.sh"
     # Skill monitor tests

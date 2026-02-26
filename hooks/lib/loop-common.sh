@@ -27,7 +27,6 @@ readonly FIELD_START_BRANCH="start_branch"
 readonly FIELD_BASE_BRANCH="base_branch"
 readonly FIELD_BASE_COMMIT="base_commit"
 readonly FIELD_PLAN_FILE="plan_file"
-readonly FIELD_PLAN_TYPE="plan_type"
 readonly FIELD_CURRENT_ROUND="current_round"
 readonly FIELD_MAX_ITERATIONS="max_iterations"
 readonly FIELD_PUSH_EVERY_ROUND="push_every_round"
@@ -320,7 +319,6 @@ _parse_state_fields() {
     STATE_BASE_BRANCH=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_BASE_BRANCH}:" | sed "s/${FIELD_BASE_BRANCH}: *//; s/^\"//; s/\"\$//" || true)
     STATE_BASE_COMMIT=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_BASE_COMMIT}:" | sed "s/${FIELD_BASE_COMMIT}: *//; s/^\"//; s/\"\$//" || true)
     STATE_PLAN_FILE=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_PLAN_FILE}:" | sed "s/${FIELD_PLAN_FILE}: *//; s/^\"//; s/\"\$//" || true)
-    STATE_PLAN_TYPE=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_PLAN_TYPE}:" | sed "s/${FIELD_PLAN_TYPE}: *//; s/^\"//; s/\"\$//" | tr -d ' ' || true)
     STATE_CURRENT_ROUND=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_CURRENT_ROUND}:" | sed "s/${FIELD_CURRENT_ROUND}: *//" | tr -d ' ' || true)
     STATE_MAX_ITERATIONS=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_MAX_ITERATIONS}:" | sed "s/${FIELD_MAX_ITERATIONS}: *//" | tr -d ' ' || true)
     STATE_PUSH_EVERY_ROUND=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_PUSH_EVERY_ROUND}:" | sed "s/${FIELD_PUSH_EVERY_ROUND}: *//" | tr -d ' ' || true)
@@ -344,7 +342,6 @@ _parse_state_fields() {
 #   STATE_START_BRANCH - branch name
 #   STATE_BASE_BRANCH - base branch for code review
 #   STATE_PLAN_FILE - plan file path
-#   STATE_PLAN_TYPE - plan type routing ("coding" or "design")
 #   STATE_CURRENT_ROUND - current round number
 #   STATE_MAX_ITERATIONS - max iterations
 #   STATE_PUSH_EVERY_ROUND - "true" or "false"
@@ -378,7 +375,6 @@ parse_state_file() {
     STATE_PUSH_EVERY_ROUND="${STATE_PUSH_EVERY_ROUND:-false}"
     STATE_FULL_REVIEW_ROUND="${STATE_FULL_REVIEW_ROUND:-5}"
     STATE_ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-true}"
-    STATE_PLAN_TYPE="${STATE_PLAN_TYPE:-coding}"
     STATE_AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
     STATE_WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
     STATE_WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
@@ -456,7 +452,6 @@ parse_state_file_strict() {
     STATE_PUSH_EVERY_ROUND="${STATE_PUSH_EVERY_ROUND:-false}"
     STATE_FULL_REVIEW_ROUND="${STATE_FULL_REVIEW_ROUND:-5}"
     STATE_ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-true}"
-    STATE_PLAN_TYPE="${STATE_PLAN_TYPE:-coding}"
     STATE_AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
     STATE_WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
     STATE_WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"

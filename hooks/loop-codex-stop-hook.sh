@@ -107,7 +107,6 @@ START_BRANCH="$STATE_START_BRANCH"
 BASE_BRANCH="${STATE_BASE_BRANCH:-}"
 BASE_COMMIT="${STATE_BASE_COMMIT:-}"
 PLAN_FILE="$STATE_PLAN_FILE"
-PLAN_TYPE="${STATE_PLAN_TYPE:-coding}"
 CURRENT_ROUND="$STATE_CURRENT_ROUND"
 MAX_ITERATIONS="$STATE_MAX_ITERATIONS"
 PUSH_EVERY_ROUND="$STATE_PUSH_EVERY_ROUND"
@@ -140,11 +139,6 @@ if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
         # Ignore malformed/unsafe state values rather than injecting untrusted content into prompts
         WORKTREE_ROOT_SAFE=""
     fi
-fi
-
-# Backward compatibility: loops started before plan_type existed default to coding.
-if [[ "$PLAN_TYPE" != "coding" && "$PLAN_TYPE" != "design" ]]; then
-    PLAN_TYPE="coding"
 fi
 
 # Re-validate Codex Model and Effort for YAML safety (in case state.md was manually edited)
@@ -1177,24 +1171,6 @@ Focus on the code changes made during this RLCR session. Focus more on changes b
     exit 0
 }
 
-# Append a routing notice for design-analysis plans where Codex is the executor.
-# Arguments: $1=prompt_file_path
-append_plan_execution_routing_note() {
-    local prompt_file="$1"
-    if [[ "$PLAN_TYPE" != "design" ]]; then
-        return
-    fi
-
-    cat >> "$prompt_file" << 'ROUTING_EOF'
-
-## Execution Routing (Plan Type: design-analysis)
-
-This loop is running in design/analysis mode.
-Task execution owner is **Codex**. Use `/humanize:ask-codex` to execute each active task, then apply the output to project artifacts.
-When Codex output is unclear, iterate with a follow-up Codex prompt before finalizing changes.
-ROUTING_EOF
-}
-
 # Continue review loop when issues are found
 # Arguments: $1=round_number, $2=review_content
 continue_review_loop_with_issues() {
@@ -1230,7 +1206,6 @@ You are in the **Review Phase** of the RLCR loop. Codex has performed a code rev
     load_and_render_safe "$TEMPLATE_DIR" "claude/review-phase-prompt.md" "$fallback" \
         "REVIEW_CONTENT=$review_content" \
         "SUMMARY_FILE=$next_summary_file" > "$next_prompt_file"
-    append_plan_execution_routing_note "$next_prompt_file"
 
     jq -n \
         --arg reason "$(cat "$next_prompt_file")" \
@@ -1718,8 +1693,6 @@ Each task must be explicitly marked parallelizable (`yes` or `no`) before assign
 WORKTREE_TEAMS_FALLBACK_EOF
     fi
 fi
-
-append_plan_execution_routing_note "$NEXT_PROMPT_FILE"
 
 # Build system message
 SYSTEM_MSG="Loop: Round $NEXT_ROUND/$MAX_ITERATIONS - Codex found issues to address"
