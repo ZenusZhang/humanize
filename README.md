@@ -10,12 +10,12 @@
 
 The name can also be interpreted as **Reinforcement Learning with Code Review** - reflecting the iterative improvement cycle where AI-generated code is continuously refined through external review feedback.
 
-A Claude Code plugin that provides iterative development with Codex review. Humanize creates a feedback loop where Claude implements your plan while Codex independently reviews the work, ensuring quality through continuous refinement.
+A Claude Code plugin that provides iterative development with Codex review. Humanize creates a feedback loop where Claude executes `coding` tasks, Codex executes `analyze` tasks, and Codex independently reviews progress.
 
 ## Core Philosophy
 
 **Iteration over Perfection**: Instead of expecting perfect output in one shot, Humanize leverages an iterative feedback loop where:
-- Claude implements your plan
+- Claude executes `coding` tasks and Codex executes `analyze` tasks
 - Codex independently reviews progress
 - Issues are caught and addressed early
 - Work continues until all acceptance criteria are met
@@ -99,7 +99,7 @@ HUMANIZE_CODEX_BYPASS_SANDBOX=true claude --plugin-dir /path/to/humanize
 
 ```mermaid
 flowchart LR
-    Plan["Your Plan<br/>(plan.md)"] --> Claude["Claude Implements<br/>& Summarizes"]
+    Plan["Your Plan<br/>(plan.md)"] --> Claude["Task Routing<br/>(coding->Claude, analyze->Codex)"]
     Claude --> Codex["Codex Reviews<br/>Summary"]
     Codex -->|Feedback Loop| Claude
     Codex -->|COMPLETE| Review["Code Review<br/>(codex review)"]
@@ -108,7 +108,9 @@ flowchart LR
 ```
 
 The loop has two phases:
-1. **Implementation Phase**: Claude works, Codex reviews summaries until COMPLETE
+1. **Implementation Phase**: Execute tasks by tag, then Codex reviews summaries until COMPLETE
+   - `coding` tag -> Claude executes directly
+   - `analyze` tag -> execute via `/humanize:ask-codex`
 2. **Review Phase**: `codex review --base <branch>` checks code quality with `[P0-9]` severity markers
 
 ### Quick Start
@@ -167,6 +169,8 @@ OPTIONS:
   --worktree-root <PATH> Root directory for generated worktrees
   -h, --help             Show help message
 ```
+
+Plan expectation: each task should include a routing tag (`coding` or `analyze`) generated during `/humanize:gen-plan`.
 
 #### Parallel Worktree Teams (Scheduler/Worker/Reviewer)
 
@@ -230,7 +234,7 @@ Workflow:
 4. Claude produces candidate plan v1
 5. Claude and a second Codex iterate reasonability review until convergence conditions are met
 6. User resolves unresolved opposite opinions
-7. Generates a structured plan.md with AC-X acceptance criteria and explicit pending decisions if needed
+7. Generates a structured plan.md with AC-X acceptance criteria, task tags (`coding`/`analyze`), and explicit pending decisions if needed
 ```
 
 #### start-pr-loop

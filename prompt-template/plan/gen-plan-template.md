@@ -66,6 +66,17 @@ Example: "The implementation includes core feature X with basic validation"
 
 <Describe relative dependencies between components, not time estimates>
 
+## Task Breakdown
+
+Each task must include exactly one routing tag:
+- `coding`: implemented by Claude
+- `analyze`: executed via Codex (`/humanize:ask-codex`)
+
+| Task ID | Description | Target AC | Tag (`coding`/`analyze`) | Depends On |
+|---------|-------------|-----------|----------------------------|------------|
+| task1 | <...> | AC-1 | coding | - |
+| task2 | <...> | AC-2 | analyze | task1 |
+
 ## Claude-Codex Deliberation
 
 ### Agreements

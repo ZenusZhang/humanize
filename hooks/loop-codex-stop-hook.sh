@@ -1171,6 +1171,22 @@ Focus on the code changes made during this RLCR session. Focus more on changes b
     exit 0
 }
 
+# Append task tag routing reminder to follow-up prompts.
+# Arguments: $1=prompt_file_path
+append_task_tag_routing_note() {
+    local prompt_file="$1"
+
+    cat >> "$prompt_file" << 'ROUTING_EOF'
+
+## Task Tag Routing Reminder
+
+Follow the plan's per-task routing tags strictly:
+- `coding` task -> Claude executes directly
+- `analyze` task -> execute via `/humanize:ask-codex`, then integrate the result
+- Keep Goal Tracker Active Tasks columns `Tag` and `Owner` aligned with execution
+ROUTING_EOF
+}
+
 # Continue review loop when issues are found
 # Arguments: $1=round_number, $2=review_content
 continue_review_loop_with_issues() {
@@ -1206,6 +1222,7 @@ You are in the **Review Phase** of the RLCR loop. Codex has performed a code rev
     load_and_render_safe "$TEMPLATE_DIR" "claude/review-phase-prompt.md" "$fallback" \
         "REVIEW_CONTENT=$review_content" \
         "SUMMARY_FILE=$next_summary_file" > "$next_prompt_file"
+    append_task_tag_routing_note "$next_prompt_file"
 
     jq -n \
         --arg reason "$(cat "$next_prompt_file")" \
@@ -1693,6 +1710,8 @@ Each task must be explicitly marked parallelizable (`yes` or `no`) before assign
 WORKTREE_TEAMS_FALLBACK_EOF
     fi
 fi
+
+append_task_tag_routing_note "$NEXT_PROMPT_FILE"
 
 # Build system message
 SYSTEM_MSG="Loop: Round $NEXT_ROUND/$MAX_ITERATIONS - Codex found issues to address"

@@ -180,6 +180,24 @@ else
     fail "plan template includes convergence log section" "Convergence Log section" "missing"
 fi
 
+if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "## Task Breakdown" "$GEN_PLAN_CMD"; then
+    pass "gen-plan command requires task breakdown section"
+else
+    fail "gen-plan command requires task breakdown section" "Task Breakdown section" "missing"
+fi
+
+if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "Task Tag Requirement" "$GEN_PLAN_CMD"; then
+    pass "gen-plan command defines mandatory coding/analyze tags"
+else
+    fail "gen-plan command defines mandatory coding/analyze tags" "Task Tag Requirement rule" "missing"
+fi
+
+if [[ -f "$PLAN_TEMPLATE" ]] && grep -q "Tag (\`coding\`/\`analyze\`)" "$PLAN_TEMPLATE"; then
+    pass "plan template includes coding/analyze task tag column"
+else
+    fail "plan template includes coding/analyze task tag column" "tag column in task table" "missing"
+fi
+
 # ----------------------------------------
 # PT-6: Agent name validation
 # ----------------------------------------
