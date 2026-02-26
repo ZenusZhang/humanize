@@ -3,6 +3,7 @@ description: "Generate implementation plan from draft document"
 argument-hint: "--input <path/to/draft.md> --output <path/to/plan.md>"
 allowed-tools:
   - "Bash(${CLAUDE_PLUGIN_ROOT}/scripts/validate-gen-plan-io.sh:*)"
+  - "Bash(${CLAUDE_PLUGIN_ROOT}/scripts/ask-codex.sh:*)"
   - "Read"
   - "Glob"
   - "Grep"
@@ -20,10 +21,11 @@ This command transforms a user's draft document into a well-structured implement
 
 1. **IO Validation**: Validate input and output paths
 2. **Relevance Check**: Verify draft is relevant to the repository
-3. **Draft Analysis**: Analyze draft for clarity, consistency, completeness, and functionality
-4. **Issue Resolution**: Engage user to clarify any issues found
-5. **Plan Generation**: Generate the structured plan.md
-6. **Write and Complete**: Write output file and report results
+3. **Claude Analysis**: Analyze draft for clarity, consistency, completeness, and functionality
+4. **Codex Counter-Analysis**: Ask Codex to challenge Claude's conclusions and propose alternatives
+5. **Issue and Disagreement Resolution**: Engage user to resolve ambiguities and unresolved Claude/Codex disagreements
+6. **Plan Generation**: Generate the structured plan.md
+7. **Write and Complete**: Write output file and report results
 
 ---
 
@@ -73,7 +75,7 @@ After IO validation passes, check if the draft is relevant to this repository.
 
 ---
 
-## Phase 3: Draft Analysis
+## Phase 3: Claude Analysis
 
 Deeply analyze the draft for potential issues. Use Explore agents to investigate the codebase.
 
@@ -108,7 +110,40 @@ Use the Task tool with `subagent_type: "Explore"` to investigate:
 
 ---
 
-## Phase 4: Issue Resolution
+## Phase 4: Codex Counter-Analysis
+
+After Claude's analysis, invoke Codex as an independent challenger.
+
+1. Run:
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/scripts/ask-codex.sh" "<structured prompt>"
+   ```
+2. The structured prompt MUST include:
+   - Repository context (project purpose, relevant files)
+   - Draft content summary
+   - Claude's current analysis and preliminary plan direction
+   - Explicit instruction for Codex to identify flaws, missing edge cases, risky assumptions, and better alternatives
+3. Require Codex output to follow this format:
+   - `AGREE:` points where Codex agrees with Claude
+   - `DISAGREE:` points where Codex disagrees and why
+   - `ALTERNATIVE:` stronger options with tradeoffs
+   - `UNRESOLVED:` issues needing human decision
+4. Parse and normalize Codex's response into a comparison matrix:
+   - Topic
+   - Claude position
+   - Codex position
+   - Impact/risk
+   - Resolution status (`resolved` or `needs_user_decision`)
+
+### Codex Availability Handling
+
+If `ask-codex.sh` fails (missing Codex CLI, timeout, or runtime error), use AskUserQuestion and let the user choose:
+- Retry with updated Codex settings/environment
+- Continue with Claude-only planning (explicitly note reduced cross-review confidence in plan output)
+
+---
+
+## Phase 5: Issue and Disagreement Resolution
 
 > **Critical**: The draft document contains the most valuable human input. During issue resolution, NEVER discard or override any original draft content. All clarifications should be treated as incremental additions that supplement the draft, not replacements. Keep track of both the original draft statements and the clarified information.
 
@@ -139,7 +174,22 @@ Document the user's answer for each metric, as this distinction significantly af
 
 ---
 
-## Phase 5: Plan Generation
+### Step 3: Resolve Unresolved Claude/Codex Disagreements
+
+For every item marked `needs_user_decision`, explicitly ask the user to decide.
+
+For each unresolved disagreement, present:
+- The decision topic
+- Claude's position
+- Codex's position
+- Tradeoffs and risks of each option
+- A clear recommendation (if one option is materially safer)
+
+If the user does not decide immediately, keep the item in the plan as `PENDING` under a dedicated user-decision section.
+
+---
+
+## Phase 6: Plan Generation
 
 Deeply think and generate the plan.md following these rules:
 
@@ -214,6 +264,22 @@ Example: "The implementation includes core feature X with basic validation"
 
 <Describe relative dependencies between components, not time estimates>
 
+## Claude-Codex Deliberation
+
+### Agreements
+- <Point both sides agree on>
+
+### Resolved Disagreements
+- <Topic>: Claude vs Codex summary, chosen resolution, and rationale
+
+## Pending User Decisions
+
+- DEC-1: <Decision topic>
+  - Claude Position: <...>
+  - Codex Position: <...>
+  - Tradeoff Summary: <...>
+  - Decision Status: `PENDING` or `<User's final decision>`
+
 ## Implementation Notes
 
 ### Code Style Requirements
@@ -244,11 +310,13 @@ Example: "The implementation includes core feature X with basic validation"
 
 10. **Code Style Constraint**: The generated plan MUST include a section or note instructing that implementation code and comments should NOT contain plan-specific progress terminology such as "AC-", "Milestone", "Step", "Phase", or similar workflow markers. These terms belong in the plan document, not in the resulting codebase.
 
-11. **Draft Completeness Requirement**: The generated plan MUST incorporate ALL information from the input draft document without omission. The draft represents the most valuable human input and must be fully preserved. Any clarifications obtained through Phase 4 should be added incrementally to the draft's original content, never replacing or losing any original requirements. The final plan must be a superset of the draft information plus all clarified details.
+11. **Draft Completeness Requirement**: The generated plan MUST incorporate ALL information from the input draft document without omission. The draft represents the most valuable human input and must be fully preserved. Any clarifications obtained through Phase 5 should be added incrementally to the draft's original content, never replacing or losing any original requirements. The final plan must be a superset of the draft information plus all clarified details.
+
+12. **Debate Traceability**: The plan MUST include Claude/Codex agreements, resolved disagreements, and unresolved decisions. Unresolved opposite opinions MUST be recorded in `## Pending User Decisions` for explicit user decision.
 
 ---
 
-## Phase 6: Write and Complete
+## Phase 7: Write and Complete
 
 The output file already contains the plan template structure and the original draft content (combined during IO validation). Now complete the plan through the following steps:
 
@@ -265,6 +333,7 @@ After updating, **read the complete plan file** and verify:
 - The plan is complete and comprehensive
 - All sections are consistent with each other
 - The structured plan aligns with the original draft content
+- Claude/Codex disagreement handling is explicit and correctly reflected
 - No contradictions exist between different parts of the document
 
 If inconsistencies are found, fix them using the Edit tool.
@@ -289,6 +358,7 @@ Report to the user:
 - Path to the generated plan
 - Summary of what was included
 - Number of acceptance criteria defined
+- Number of unresolved user decisions (if any)
 - Whether language was unified (if applicable)
 
 ---

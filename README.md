@@ -1,6 +1,6 @@
 # Humanize
 
-**Current Version: 1.10.6**
+**Current Version: 1.10.7**
 
 > Derived from the [GAAC (GitHub-as-a-Context)](https://github.com/SihaoLiu/gaac) project.
 
@@ -226,9 +226,10 @@ The gen-plan command transforms rough draft documents into structured implementa
 Workflow:
 1. Validates input/output paths
 2. Checks if draft is relevant to the repository
-3. Analyzes draft for clarity, consistency, completeness, and functionality
-4. Engages user to resolve any issues found
-5. Generates a structured plan.md with AC-X acceptance criteria
+3. Claude analyzes draft clarity, consistency, completeness, and functionality
+4. Codex provides counter-analysis and challenges assumptions
+5. User resolves unresolved Claude/Codex disagreements
+6. Generates a structured plan.md with AC-X acceptance criteria and explicit pending decisions if needed
 ```
 
 #### start-pr-loop

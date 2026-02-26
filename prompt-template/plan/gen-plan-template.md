@@ -66,6 +66,22 @@ Example: "The implementation includes core feature X with basic validation"
 
 <Describe relative dependencies between components, not time estimates>
 
+## Claude-Codex Deliberation
+
+### Agreements
+- <Point both sides agree on>
+
+### Resolved Disagreements
+- <Topic>: Claude vs Codex summary, chosen resolution, and rationale
+
+## Pending User Decisions
+
+- DEC-1: <Decision topic>
+  - Claude Position: <...>
+  - Codex Position: <...>
+  - Tradeoff Summary: <...>
+  - Decision Status: `PENDING` or `<User's final decision>`
+
 ## Implementation Notes
 
 ### Code Style Requirements

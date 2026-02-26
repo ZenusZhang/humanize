@@ -116,6 +116,37 @@ else
 fi
 
 # ----------------------------------------
+# PT-5b: Claude/Codex deliberation workflow validation
+# ----------------------------------------
+echo ""
+echo "PT-5b: Claude/Codex deliberation workflow validation"
+PLAN_TEMPLATE="$PROJECT_ROOT/prompt-template/plan/gen-plan-template.md"
+
+if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "scripts/ask-codex.sh" "$GEN_PLAN_CMD"; then
+    pass "gen-plan command allows ask-codex script"
+else
+    fail "gen-plan command allows ask-codex script" "ask-codex script reference" "missing"
+fi
+
+if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "## Pending User Decisions" "$GEN_PLAN_CMD"; then
+    pass "gen-plan command requires pending user decisions section"
+else
+    fail "gen-plan command requires pending user decisions section" "Pending User Decisions section" "missing"
+fi
+
+if [[ -f "$PLAN_TEMPLATE" ]] && grep -q "## Claude-Codex Deliberation" "$PLAN_TEMPLATE"; then
+    pass "plan template includes Claude-Codex deliberation section"
+else
+    fail "plan template includes Claude-Codex deliberation section" "Claude-Codex Deliberation section" "missing"
+fi
+
+if [[ -f "$PLAN_TEMPLATE" ]] && grep -q "## Pending User Decisions" "$PLAN_TEMPLATE"; then
+    pass "plan template includes pending user decisions section"
+else
+    fail "plan template includes pending user decisions section" "Pending User Decisions section" "missing"
+fi
+
+# ----------------------------------------
 # PT-6: Agent name validation
 # ----------------------------------------
 echo ""
