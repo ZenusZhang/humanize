@@ -38,6 +38,8 @@ readonly FIELD_FULL_REVIEW_ROUND="full_review_round"
 readonly FIELD_ASK_CODEX_QUESTION="ask_codex_question"
 readonly FIELD_SESSION_ID="session_id"
 readonly FIELD_AGENT_TEAMS="agent_teams"
+readonly FIELD_WORKTREE_TEAMS="worktree_teams"
+readonly FIELD_WORKTREE_ROOT="worktree_root"
 
 # Default Codex configuration (single source of truth - all scripts reference this)
 # Both use :- so scripts can override before sourcing (e.g. PR loop sets different model/effort)
@@ -328,6 +330,8 @@ _parse_state_fields() {
     STATE_ASK_CODEX_QUESTION=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_ASK_CODEX_QUESTION}:" | sed "s/${FIELD_ASK_CODEX_QUESTION}: *//" | tr -d ' ' || true)
     STATE_SESSION_ID=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_SESSION_ID}:" | sed "s/${FIELD_SESSION_ID}: *//" || true)
     STATE_AGENT_TEAMS=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_AGENT_TEAMS}:" | sed "s/${FIELD_AGENT_TEAMS}: *//" | tr -d ' ' || true)
+    STATE_WORKTREE_TEAMS=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_WORKTREE_TEAMS}:" | sed "s/${FIELD_WORKTREE_TEAMS}: *//" | tr -d ' ' || true)
+    STATE_WORKTREE_ROOT=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_WORKTREE_ROOT}:" | sed "s/${FIELD_WORKTREE_ROOT}: *//" | sed 's/^"//; s/"$//' || true)
 }
 
 # Parse state file frontmatter and set variables (tolerant mode with defaults)
@@ -347,6 +351,9 @@ _parse_state_fields() {
 #   STATE_REVIEW_STARTED - "true" or "false"
 #   STATE_FULL_REVIEW_ROUND - interval for Full Alignment Check (default: 5)
 #   STATE_ASK_CODEX_QUESTION - "true" or "false" (v1.6.5+)
+#   STATE_AGENT_TEAMS - "true" or "false"
+#   STATE_WORKTREE_TEAMS - "true" or "false"
+#   STATE_WORKTREE_ROOT - worktree root path when worktree teams are enabled
 # Returns: 0 on success, 1 if file not found
 # Note: For strict validation, use parse_state_file_strict() instead
 parse_state_file() {
@@ -369,6 +376,8 @@ parse_state_file() {
     STATE_FULL_REVIEW_ROUND="${STATE_FULL_REVIEW_ROUND:-5}"
     STATE_ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-true}"
     STATE_AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
+    STATE_WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
+    STATE_WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
     # STATE_REVIEW_STARTED left as-is (empty if missing, to allow schema validation)
 
     return 0
@@ -444,6 +453,8 @@ parse_state_file_strict() {
     STATE_FULL_REVIEW_ROUND="${STATE_FULL_REVIEW_ROUND:-5}"
     STATE_ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-true}"
     STATE_AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
+    STATE_WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
+    STATE_WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
 
     return 0
 }

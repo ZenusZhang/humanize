@@ -1,6 +1,6 @@
 # Humanize
 
-**Current Version: 1.10.4**
+**Current Version: 1.10.6**
 
 > Derived from the [GAAC (GitHub-as-a-Context)](https://github.com/SihaoLiu/gaac) project.
 
@@ -52,6 +52,7 @@ claude --plugin-dir /path/to/humanize
 ### Prerequisites
 
 - `codex` - OpenAI Codex CLI (for review). Check with `codex --version`.
+- `python3` (recommended) or GNU `readlink` with `-f`/`-m` support when using `--worktree-teams`.
 
 ### Environment Variables
 
@@ -137,6 +138,7 @@ The loop has two phases:
 | `/start-pr-loop --claude\|--codex` | Start PR review loop with bot monitoring |
 | `/cancel-pr-loop` | Cancel active PR loop |
 | `/ask-codex [question]` | One-shot consultation with Codex |
+| `/setup-worktree-teams [options]` | Provision worker/reviewer git worktree lanes for RLCR agent teams |
 
 ### Command Options
 
@@ -160,7 +162,54 @@ OPTIONS:
                          Interval for Full Alignment Check rounds (default: 5, min: 2)
   --skip-impl            Skip implementation phase, go directly to code review
                          Plan file is optional when using this flag
+  --agent-teams          Enable Claude Agent Teams mode (requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)
+  --worktree-teams       In Agent Teams mode, require scheduler/worker/reviewer orchestration via git worktree
+  --worktree-root <PATH> Root directory for generated worktrees
   -h, --help             Show help message
+```
+
+#### Parallel Worktree Teams (Scheduler/Worker/Reviewer)
+
+For explicit scheduler/worker/reviewer execution with isolated branches:
+
+```bash
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+/humanize:start-rlcr-loop docs/my-feature-plan.md --agent-teams --worktree-teams
+```
+
+In this mode, the scheduler (team leader) must:
+- Mark every task as parallelizable (`yes`/`no`)
+- Assign parallelizable tasks to dedicated `git worktree` lanes
+- Pair worker and reviewer agents per lane to avoid file overwrite conflicts
+
+Helper command:
+
+```bash
+/humanize:setup-worktree-teams --workers 3 --reviewers 2
+```
+
+Direct script usage is also supported:
+
+```bash
+scripts/setup-worktree-teams.sh --workers 3 --reviewers 2
+```
+
+Note: secure worktree-root canonicalization requires `python3` (preferred) or GNU `readlink` with `-f`/`-m`.
+
+#### setup-worktree-teams
+
+```
+/humanize:setup-worktree-teams [OPTIONS]
+
+OPTIONS:
+  --workers <N>         Number of worker lanes (default: 2)
+  --reviewers <N>       Number of reviewer lanes (default: same as workers)
+  --loop-dir <PATH>     Active RLCR loop directory (auto-detected if omitted)
+  --worktree-root <PATH>
+                        Root directory for worktrees (default: state value, then .humanize/worktrees/<loop-id>)
+  --branch-prefix <P>   Branch prefix for generated lanes (default: rlcr-worktree)
+  --base-ref <REF>      Base ref for new branches (default: start_branch from state, else current branch)
+  -h, --help            Show help message
 ```
 
 #### gen-plan

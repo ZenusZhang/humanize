@@ -1,6 +1,6 @@
 ---
 description: "Start iterative loop with Codex review"
-argument-hint: "[path/to/plan.md | --plan-file path/to/plan.md] [--max N] [--codex-model MODEL:EFFORT] [--codex-timeout SECONDS] [--track-plan-file] [--push-every-round] [--base-branch BRANCH] [--full-review-round N] [--skip-impl] [--claude-answer-codex] [--agent-teams]"
+argument-hint: "[path/to/plan.md | --plan-file path/to/plan.md] [--max N] [--codex-model MODEL:EFFORT] [--codex-timeout SECONDS] [--track-plan-file] [--push-every-round] [--base-branch BRANCH] [--full-review-round N] [--skip-impl] [--claude-answer-codex] [--agent-teams] [--worktree-teams] [--worktree-root PATH]"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-rlcr-loop.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
@@ -65,6 +65,17 @@ The RLCR loop has two phases within the active loop:
 2. **Review Phase**: After COMPLETE, `codex review` checks code quality with `[P0-9]` severity markers
 
 The `--base-branch` option specifies the base branch for code review comparison. If not provided, it auto-detects from: remote default > local main > local master.
+
+## Agent Teams + Worktree Orchestration
+
+Use `--agent-teams --worktree-teams` to enforce explicit scheduler/worker/reviewer orchestration:
+- Scheduler (team leader) must label every task as parallelizable (`yes/no`)
+- Parallelizable tasks should be assigned to isolated `git worktree` lanes
+- Workers implement in their own worktrees, reviewers validate per-worktree output
+- Use `/humanize:setup-worktree-teams` to provision lane directories and assignment mapping
+
+Optional `--worktree-root <path>` controls where worktrees are created. Default is `.humanize/worktrees/<loop-timestamp>`.
+Path canonicalization for this mode uses `python3` (preferred) or GNU `readlink` (`-f`/`-m`).
 
 ## Skip Implementation Mode
 

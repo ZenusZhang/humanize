@@ -117,6 +117,29 @@ CODEX_EFFORT="${STATE_CODEX_EFFORT:-$DEFAULT_CODEX_EFFORT}"
 CODEX_TIMEOUT="${STATE_CODEX_TIMEOUT:-${CODEX_TIMEOUT:-$DEFAULT_CODEX_TIMEOUT}}"
 ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-false}"
 AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
+WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
+WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
+WORKTREE_ROOT_SAFE="$WORKTREE_ROOT"
+if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
+    while [[ "$WORKTREE_ROOT_SAFE" == ./* ]]; do
+        WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE#./}"
+    done
+    while [[ "$WORKTREE_ROOT_SAFE" == *"//"* ]]; do
+        WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE//\/\//\/}"
+    done
+    WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE%/}"
+fi
+if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
+    if [[ ! "$WORKTREE_ROOT_SAFE" =~ ^[a-zA-Z0-9._/-]+$ ]] || \
+       [[ "$WORKTREE_ROOT_SAFE" = /* ]] || \
+       [[ "$WORKTREE_ROOT_SAFE" =~ (^|/)\.\.(/|$) ]] || \
+       [[ "$WORKTREE_ROOT_SAFE" == "." ]] || \
+       [[ "$WORKTREE_ROOT_SAFE" == ".git" ]] || \
+       [[ "$WORKTREE_ROOT_SAFE" == .git/* ]]; then
+        # Ignore malformed/unsafe state values rather than injecting untrusted content into prompts
+        WORKTREE_ROOT_SAFE=""
+    fi
+fi
 
 # Re-validate Codex Model and Effort for YAML safety (in case state.md was manually edited)
 # Use same validation patterns as setup-rlcr-loop.sh
@@ -1647,6 +1670,27 @@ Continue using **Agent Teams mode** as the **Team Leader**.
 Split remaining work among team members and coordinate their efforts.
 Do NOT do implementation work yourself - delegate all coding to team members.
 AGENT_TEAMS_FALLBACK_EOF
+    fi
+fi
+
+# Add worktree orchestration continuation guidance when enabled
+if [[ "$WORKTREE_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]]; then
+    WORKTREE_TEAMS_CONTINUE=$(load_template "$TEMPLATE_DIR" "claude/worktree-teams-continue.md" 2>/dev/null)
+    if [[ -n "$WORKTREE_TEAMS_CONTINUE" ]]; then
+        echo "" >> "$NEXT_PROMPT_FILE"
+        echo "$WORKTREE_TEAMS_CONTINUE" >> "$NEXT_PROMPT_FILE"
+        if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
+            echo "" >> "$NEXT_PROMPT_FILE"
+            echo "Current worktree root from state: \`$WORKTREE_ROOT_SAFE\`" >> "$NEXT_PROMPT_FILE"
+        fi
+    else
+        cat >> "$NEXT_PROMPT_FILE" << 'WORKTREE_TEAMS_FALLBACK_EOF'
+
+## Worktree Teams Continuation
+
+Continue using scheduler/worker/reviewer worktree orchestration.
+Each task must be explicitly marked parallelizable (`yes` or `no`) before assignment.
+WORKTREE_TEAMS_FALLBACK_EOF
     fi
 fi
 

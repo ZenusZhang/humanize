@@ -347,7 +347,7 @@ _humanize_monitor_codex() {
     _parse_state_md() {
         local state_file="$1"
         if [[ ! -f "$state_file" ]]; then
-            echo "N/A|N/A|N/A|N/A|N/A|N/A|N/A|false|false||"
+            echo "N/A|N/A|N/A|N/A|N/A|N/A|N/A|false|false|||"
             return
         fi
 
@@ -361,9 +361,10 @@ _humanize_monitor_codex() {
         local ask_codex_question=$(grep -E "^ask_codex_question:" "$state_file" 2>/dev/null | sed 's/ask_codex_question: *//' | tr -d ' ')
         local review_started=$(grep -E "^review_started:" "$state_file" 2>/dev/null | sed 's/review_started: *//' | tr -d ' ')
         local agent_teams=$(grep -E "^agent_teams:" "$state_file" 2>/dev/null | sed 's/agent_teams: *//' | tr -d ' ')
+        local worktree_teams=$(grep -E "^worktree_teams:" "$state_file" 2>/dev/null | sed 's/worktree_teams: *//' | tr -d ' ')
         local push_every_round=$(grep -E "^push_every_round:" "$state_file" 2>/dev/null | sed 's/push_every_round: *//' | tr -d ' ')
 
-        echo "${current_round:-N/A}|${max_iterations:-N/A}|${full_review_round:-N/A}|${codex_model:-N/A}|${codex_effort:-N/A}|${started_at:-N/A}|${plan_file:-N/A}|${ask_codex_question:-false}|${review_started:-false}|${agent_teams:-}|${push_every_round:-}"
+        echo "${current_round:-N/A}|${max_iterations:-N/A}|${full_review_round:-N/A}|${codex_model:-N/A}|${codex_effort:-N/A}|${started_at:-N/A}|${plan_file:-N/A}|${ask_codex_question:-false}|${review_started:-false}|${agent_teams:-}|${worktree_teams:-}|${push_every_round:-}"
     }
 
     # Internal wrappers that call top-level functions
@@ -402,7 +403,8 @@ _humanize_monitor_codex() {
         local ask_codex_question="${state_parts[7]:-false}"
         local review_started="${state_parts[8]:-false}"
         local agent_teams="${state_parts[9]:-}"
-        local push_every_round="${state_parts[10]:-}"
+        local worktree_teams="${state_parts[10]:-}"
+        local push_every_round="${state_parts[11]:-}"
 
         # Parse goal-tracker.md
         local -a goal_parts
@@ -545,6 +547,15 @@ _humanize_monitor_codex() {
                 team_color="${green}"
             fi
             team_mode_segment=" | Team Mode: ${team_color}${team_display}${reset}"
+            if [[ -n "$worktree_teams" ]]; then
+                local worktree_display="Off"
+                local worktree_color="${yellow}"
+                if [[ "$worktree_teams" == "true" ]]; then
+                    worktree_display="On"
+                    worktree_color="${green}"
+                fi
+                team_mode_segment="${team_mode_segment} | Worktrees: ${worktree_color}${worktree_display}${reset}"
+            fi
         fi
         printf "${magenta}Status:${reset}   ${status_line} | Codex Ask Question: ${ask_q_color}${ask_q_display}${reset}${team_mode_segment}${clr_eol}\n"
 

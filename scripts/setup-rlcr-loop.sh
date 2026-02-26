@@ -48,6 +48,8 @@ SKIP_IMPL="false"
 SKIP_IMPL_NO_PLAN="false"
 ASK_CODEX_QUESTION="true"
 AGENT_TEAMS="false"
+WORKTREE_TEAMS="false"
+WORKTREE_ROOT=""
 
 show_help() {
     cat << 'HELP_EOF'
@@ -86,6 +88,11 @@ OPTIONS:
   --agent-teams        Enable Claude Code Agent Teams mode for parallel development.
                        Requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 environment variable.
                        Claude acts as team leader, splitting tasks among team members.
+  --worktree-teams     Enable scheduler/worker/reviewer orchestration with git worktree.
+                       Requires --agent-teams and path canonicalization support
+                       (python3 preferred, or GNU readlink with -f/-m).
+  --worktree-root <PATH>
+                       Root directory for generated worktrees (default: .humanize/worktrees/<loop-timestamp>)
   -h, --help           Show this help message
 
 DESCRIPTION:
@@ -111,6 +118,7 @@ EXAMPLES:
   /humanize:start-rlcr-loop docs/impl.md --max 20
   /humanize:start-rlcr-loop plan.md --codex-model gpt-5.3-codex:xhigh
   /humanize:start-rlcr-loop plan.md --codex-timeout 7200  # 2 hour timeout
+  /humanize:start-rlcr-loop plan.md --agent-teams --worktree-teams
 
 STOPPING:
   - /humanize:cancel-rlcr-loop   Cancel the active loop
@@ -226,6 +234,18 @@ while [[ $# -gt 0 ]]; do
             AGENT_TEAMS="true"
             shift
             ;;
+        --worktree-teams)
+            WORKTREE_TEAMS="true"
+            shift
+            ;;
+        --worktree-root)
+            if [[ -z "${2:-}" ]] || [[ "${2:-}" == -* ]]; then
+                echo "Error: --worktree-root requires a relative path argument" >&2
+                exit 1
+            fi
+            WORKTREE_ROOT="$2"
+            shift 2
+            ;;
         -*)
             echo "Unknown option: $1" >&2
             echo "Use --help for usage information" >&2
@@ -293,6 +313,51 @@ if [[ "$AGENT_TEAMS" == "true" ]]; then
         echo "  export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1" >&2
         echo "" >&2
         echo "Or add it to your shell profile (~/.bashrc, ~/.zshrc) for persistent access." >&2
+        exit 1
+    fi
+fi
+
+if [[ "$WORKTREE_TEAMS" == "true" && "$AGENT_TEAMS" != "true" ]]; then
+    echo "Error: --worktree-teams requires --agent-teams" >&2
+    exit 1
+fi
+
+if [[ "$WORKTREE_TEAMS" == "true" && "$SKIP_IMPL" == "true" ]]; then
+    echo "Error: --worktree-teams cannot be used with --skip-impl" >&2
+    echo "  Worktree orchestration is only meaningful during implementation rounds." >&2
+    exit 1
+fi
+
+if [[ -n "$WORKTREE_ROOT" && "$WORKTREE_TEAMS" != "true" ]]; then
+    echo "Error: --worktree-root requires --worktree-teams" >&2
+    exit 1
+fi
+
+if [[ -n "$WORKTREE_ROOT" ]]; then
+    # Normalize before validation so variants like "./", ".//", "./.git" are caught.
+    while [[ "$WORKTREE_ROOT" == ./* ]]; do
+        WORKTREE_ROOT="${WORKTREE_ROOT#./}"
+    done
+    while [[ "$WORKTREE_ROOT" == *"//"* ]]; do
+        WORKTREE_ROOT="${WORKTREE_ROOT//\/\//\/}"
+    done
+    WORKTREE_ROOT="${WORKTREE_ROOT%/}"
+
+    if [[ "$WORKTREE_ROOT" = /* ]]; then
+        echo "Error: --worktree-root must be a relative path, got: $WORKTREE_ROOT" >&2
+        exit 1
+    fi
+    if [[ ! "$WORKTREE_ROOT" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+        echo "Error: --worktree-root contains unsupported characters, got: $WORKTREE_ROOT" >&2
+        echo "  Allowed characters: letters, numbers, dot, underscore, slash, hyphen" >&2
+        exit 1
+    fi
+    if [[ "$WORKTREE_ROOT" =~ (^|/)\.\.(/|$) ]]; then
+        echo "Error: --worktree-root must stay within the project directory, got: $WORKTREE_ROOT" >&2
+        exit 1
+    fi
+    if [[ -z "$WORKTREE_ROOT" || "$WORKTREE_ROOT" == "." || "$WORKTREE_ROOT" == ".git" || "$WORKTREE_ROOT" == .git/* ]]; then
+        echo "Error: --worktree-root must not target repository root or .git internals: $WORKTREE_ROOT" >&2
         exit 1
     fi
 fi
@@ -728,6 +793,49 @@ LOOP_BASE_DIR="$PROJECT_ROOT/.humanize/rlcr"
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 LOOP_DIR="$LOOP_BASE_DIR/$TIMESTAMP"
 
+# Resolve worktree root after timestamp is known
+if [[ "$WORKTREE_TEAMS" == "true" ]]; then
+    if [[ -z "$WORKTREE_ROOT" ]]; then
+        WORKTREE_ROOT=".humanize/worktrees/$TIMESTAMP"
+    fi
+    # Strip trailing slash for consistency in state file and prompts
+    WORKTREE_ROOT="${WORKTREE_ROOT%/}"
+
+    # Resolve symlinks before creation so relative roots cannot escape project via symlinked parents
+    PROJECT_ROOT_REAL=$(cd "$PROJECT_ROOT" && pwd -P)
+    WORKTREE_TARGET_PATH="$PROJECT_ROOT/$WORKTREE_ROOT"
+    if command -v python3 >/dev/null 2>&1; then
+        WORKTREE_TARGET_REAL=$(python3 - "$WORKTREE_TARGET_PATH" <<'PY'
+import os
+import sys
+print(os.path.realpath(sys.argv[1]))
+PY
+)
+    elif command -v readlink >/dev/null 2>&1; then
+        # Prefer -f; fall back to -m for paths with missing parents.
+        WORKTREE_TARGET_REAL=$(readlink -f "$WORKTREE_TARGET_PATH" 2>/dev/null || readlink -m "$WORKTREE_TARGET_PATH" 2>/dev/null || echo "")
+    else
+        WORKTREE_TARGET_REAL=""
+    fi
+
+    if [[ -z "$WORKTREE_TARGET_REAL" ]]; then
+        echo "Error: Unable to resolve canonical path for worktree root: $WORKTREE_TARGET_PATH" >&2
+        echo "  Install python3 or readlink with -f support to use --worktree-teams." >&2
+        exit 1
+    fi
+
+    if [[ "$WORKTREE_TARGET_REAL" != "$PROJECT_ROOT_REAL" && "$WORKTREE_TARGET_REAL" != "$PROJECT_ROOT_REAL/"* ]]; then
+        echo "Error: --worktree-root resolves outside project root via symlink traversal." >&2
+        echo "  Root: $WORKTREE_TARGET_REAL" >&2
+        echo "  Project: $PROJECT_ROOT_REAL" >&2
+        exit 1
+    fi
+
+    mkdir -p "$WORKTREE_TARGET_PATH"
+else
+    WORKTREE_ROOT=""
+fi
+
 mkdir -p "$LOOP_DIR"
 
 # Copy plan file to loop directory as backup (or create placeholder for skip-impl)
@@ -782,6 +890,8 @@ review_started: $INITIAL_REVIEW_STARTED
 ask_codex_question: $ASK_CODEX_QUESTION
 session_id:
 agent_teams: $AGENT_TEAMS
+worktree_teams: $WORKTREE_TEAMS
+worktree_root: $WORKTREE_ROOT
 started_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 ---
 EOF
@@ -1022,6 +1132,24 @@ AGENT_TEAMS_EOF
     fi
 fi
 
+# Inject worktree-specific orchestration instructions (requires agent teams)
+if [[ "$WORKTREE_TEAMS" == "true" ]]; then
+    WORKTREE_TEAMS_TEMPLATE="$TEMPLATE_DIR/claude/worktree-teams-instructions.md"
+    if [[ -f "$WORKTREE_TEAMS_TEMPLATE" ]]; then
+        echo "" >> "$LOOP_DIR/round-0-prompt.md"
+        cat "$WORKTREE_TEAMS_TEMPLATE" >> "$LOOP_DIR/round-0-prompt.md"
+    else
+        cat >> "$LOOP_DIR/round-0-prompt.md" << 'WORKTREE_TEAMS_EOF'
+
+## Scheduler + Worktree Mode
+
+You are the scheduler. Explicitly mark every task as parallelizable (`yes` or `no`), then assign
+parallelizable tasks to isolated `git worktree` lanes for worker/reviewer pairs.
+Use `scripts/setup-worktree-teams.sh` to provision worktrees and record assignments before coding.
+WORKTREE_TEAMS_EOF
+    fi
+fi
+
 # Write prompt footer
 cat >> "$LOOP_DIR/round-0-prompt.md" << EOF
 
@@ -1111,6 +1239,9 @@ Codex Effort: $CODEX_EFFORT
 Codex Timeout: ${CODEX_TIMEOUT}s
 Full Review Round: $FULL_REVIEW_ROUND (Full Alignment Checks at rounds $((FULL_REVIEW_ROUND - 1)), $((2 * FULL_REVIEW_ROUND - 1)), $((3 * FULL_REVIEW_ROUND - 1)), ...)
 Ask User for Codex Questions: $ASK_CODEX_QUESTION
+Agent Teams: $AGENT_TEAMS
+Worktree Teams: $WORKTREE_TEAMS
+Worktree Root: ${WORKTREE_ROOT:-N/A}
 Loop Directory: $LOOP_DIR
 
 The loop is now active. When you try to exit:
