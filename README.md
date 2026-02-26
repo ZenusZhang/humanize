@@ -118,6 +118,8 @@ The loop has two phases:
 1. **Create a plan file** or just write down your thoughts in `<name/you/like/for/draft>.md` and use `/humanize:gen-plan`
    ```bash
    /humanize:gen-plan --input <name/you/like/for/draft.md> --output <docs/my-feature-plan.md>
+   # Optional: auto-start RLCR if the plan converges cleanly
+   /humanize:gen-plan --input <name/you/like/for/draft.md> --output <docs/my-feature-plan.md> --auto-start-rlcr-if-converged
    ``` 
 3. **Run the loop**:
    ```bash
@@ -219,22 +221,25 @@ OPTIONS:
 #### gen-plan
 
 ```
-/humanize:gen-plan --input <path/to/draft.md> --output <path/to/plan.md>
+/humanize:gen-plan --input <path/to/draft.md> --output <path/to/plan.md> [--auto-start-rlcr-if-converged]
 
 OPTIONS:
   --input   Path to the input draft file (required)
   --output  Path to the output plan file (required)
+  --auto-start-rlcr-if-converged
+            If plan convergence succeeds and no pending user decisions remain,
+            skip manual plan review and immediately start RLCR work.
 
 The gen-plan command transforms rough draft documents into structured implementation plans.
 
 Workflow:
 1. Validates input/output paths
 2. Checks if draft is relevant to the repository
-3. Codex performs first-pass analysis before plan synthesis
-4. Claude produces candidate plan v1
+3. Claude runs with ultrathink and one planning Codex performs first-pass analysis
+4. Claude produces candidate plan v1 and implementation handoff summary
 5. Claude and a second Codex iterate reasonability review until convergence conditions are met
-6. User resolves unresolved opposite opinions
-7. Generates a structured plan.md with AC-X acceptance criteria, task tags (`coding`/`analyze`), and explicit pending decisions if needed
+6. Optional manual review gate: user resolves unresolved opposite opinions unless auto-start mode skips it after convergence
+7. Generates a structured plan.md with AC-X acceptance criteria, task tags (`coding`/`analyze`), and three-batch Codex workflow (plan -> implement -> review)
 ```
 
 #### start-pr-loop

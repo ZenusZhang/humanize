@@ -77,6 +77,25 @@ Each task must include exactly one routing tag:
 | task1 | <...> | AC-1 | coding | - |
 | task2 | <...> | AC-2 | analyze | task1 |
 
+## Codex Team Workflow
+
+### Batch 1 - Planning Codex
+- Input: raw draft + repository context
+- Output: risk map, missing requirements, and plan critiques
+
+### Batch 2 - Implementation Codex Team
+- Input: converged plan + concise implementation handoff summary
+- Output: implementation changes aligned to ACs and task dependencies
+- Handoff Summary:
+  - Scope:
+  - Key Constraints:
+  - High-Risk Areas:
+  - Required Validations:
+
+### Batch 3 - Review Codex Team
+- Input: implementation summaries and changed files
+- Output: independent quality review, risk checks, and final readiness verdict
+
 ## Claude-Codex Deliberation
 
 ### Agreements

@@ -1,9 +1,10 @@
 ---
 description: "Generate implementation plan from draft document"
-argument-hint: "--input <path/to/draft.md> --output <path/to/plan.md>"
+argument-hint: "--input <path/to/draft.md> --output <path/to/plan.md> [--auto-start-rlcr-if-converged]"
 allowed-tools:
   - "Bash(${CLAUDE_PLUGIN_ROOT}/scripts/validate-gen-plan-io.sh:*)"
   - "Bash(${CLAUDE_PLUGIN_ROOT}/scripts/ask-codex.sh:*)"
+  - "Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-rlcr-loop.sh:*)"
   - "Read"
   - "Glob"
   - "Grep"
@@ -15,18 +16,31 @@ hide-from-slash-command-tool: "true"
 
 # Generate Plan from Draft
 
+Read and execute below with ultrathink.
+
 This command transforms a user's draft document into a well-structured implementation plan with clear goals, acceptance criteria (AC-X format), path boundaries, and feasibility suggestions.
 
 ## Workflow Overview
 
-1. **IO Validation**: Validate input and output paths
-2. **Relevance Check**: Verify draft is relevant to the repository
-3. **Codex First-Pass Analysis**: Let Codex analyze the draft before Claude synthesizes plan details
-4. **Claude Candidate Plan (v1)**: Claude builds an initial plan from draft + Codex findings
-5. **Iterative Convergence Loop**: Claude and a second Codex iteratively challenge/refine plan reasonability
-6. **Issue and Disagreement Resolution**: Engage user to resolve unresolved opposite opinions
-7. **Final Plan Generation**: Generate the converged structured plan.md with task routing tags
-8. **Write and Complete**: Write output file and report results
+1. **Execution Mode Setup**: Parse optional behaviors from command arguments
+2. **IO Validation**: Validate input and output paths
+3. **Relevance Check**: Verify draft is relevant to the repository
+4. **Codex First-Pass Analysis**: Use one planning Codex before Claude synthesizes plan details
+5. **Claude Candidate Plan (v1)**: Claude builds an initial plan from draft + Codex findings
+6. **Iterative Convergence Loop**: Claude and a second Codex iteratively challenge/refine plan reasonability
+7. **Issue and Disagreement Resolution**: Resolve unresolved opposite opinions (or skip manual review if converged and auto-start mode is enabled)
+8. **Final Plan Generation**: Generate the converged structured plan.md with task routing tags and Codex handoff sections
+9. **Write and Complete**: Write output file, optionally auto-start work, and report results
+
+---
+
+## Phase 0: Execution Mode Setup
+
+Parse `$ARGUMENTS` and set:
+- `AUTO_START_RLCR_IF_CONVERGED=true` if `--auto-start-rlcr-if-converged` is present
+- `AUTO_START_RLCR_IF_CONVERGED=false` otherwise
+
+This option allows skipping manual plan review and starting implementation immediately, but only when plan convergence is achieved and no pending user decisions remain.
 
 ---
 
@@ -80,6 +94,8 @@ After IO validation passes, check if the draft is relevant to this repository.
 
 After relevance check, invoke Codex BEFORE Claude plan synthesis.
 
+This Codex pass is the **planning Codex batch (Batch 1)** in the multi-Codex workflow.
+
 1. Run:
    ```bash
    "${CLAUDE_PLUGIN_ROOT}/scripts/ask-codex.sh" "<structured prompt>"
@@ -96,6 +112,7 @@ After relevance check, invoke Codex BEFORE Claude plan synthesis.
    - `QUESTIONS_FOR_USER:` questions that need explicit human decisions
    - `CANDIDATE_CRITERIA:` candidate acceptance criteria suggestions
 4. Preserve this output as **Codex Analysis v1** and feed it into Claude planning.
+5. Record a concise **Batch 1 Planning Summary** that can later be handed to implementation Codex agents.
 
 ### Codex Availability Handling
 
@@ -110,6 +127,8 @@ If `ask-codex.sh` fails (missing Codex CLI, timeout, or runtime error), use AskU
 Use draft content + Codex Analysis v1 to produce an initial candidate plan and issue map.
 
 Deeply analyze the draft for potential issues. Use Explore agents to investigate the codebase.
+
+Alongside candidate plan v1, prepare an **Implementation Handoff Draft** for later Batch 2 Codex implementers. It should summarize scope, boundaries, dependencies, and known risks in concise execution language.
 
 ### Analysis Dimensions
 
@@ -180,13 +199,25 @@ Repeat convergence rounds until one of the following is true:
 
 If max rounds are reached with unresolved opposite opinions, carry them to user decision phase explicitly.
 
+Set convergence state explicitly:
+- `PLAN_CONVERGENCE_STATUS=converged` when convergence conditions are met
+- `PLAN_CONVERGENCE_STATUS=partially_converged` otherwise
+
 ---
 
 ## Phase 6: Issue and Disagreement Resolution
 
 > **Critical**: The draft document contains the most valuable human input. During issue resolution, NEVER discard or override any original draft content. All clarifications should be treated as incremental additions that supplement the draft, not replacements. Keep track of both the original draft statements and the clarified information.
 
-### Step 1: Resolve Analysis Issues
+### Step 1: Manual Review Gate
+
+Decide if manual review can be skipped:
+- If `AUTO_START_RLCR_IF_CONVERGED=true` **and** `PLAN_CONVERGENCE_STATUS=converged`, set `HUMAN_REVIEW_REQUIRED=false`
+- Otherwise set `HUMAN_REVIEW_REQUIRED=true`
+
+If `HUMAN_REVIEW_REQUIRED=false`, skip Step 2-4 and continue directly to Phase 7.
+
+### Step 2: Resolve Analysis Issues (when manual review is required)
 
 If any issues are found during Codex-first analysis, Claude analysis, or convergence loop, use AskUserQuestion to clarify with the user.
 
@@ -197,7 +228,7 @@ For each issue category that has problems, present:
 
 Continue this dialogue until all significant issues are resolved or acknowledged by the user.
 
-### Step 2: Confirm Quantitative Metrics
+### Step 3: Confirm Quantitative Metrics (when manual review is required)
 
 After all analysis issues are resolved, check the draft for any quantitative metrics or numeric thresholds, such as:
 - Performance targets: "less than 15GB/s", "under 100ms latency"
@@ -213,7 +244,7 @@ Document the user's answer for each metric, as this distinction significantly af
 
 ---
 
-### Step 3: Resolve Unresolved Claude/Codex Disagreements
+### Step 4: Resolve Unresolved Claude/Codex Disagreements (when manual review is required)
 
 For every item marked `needs_user_decision`, explicitly ask the user to decide.
 
@@ -314,6 +345,25 @@ Each task MUST include exactly one routing tag generated by the planning agent:
 | task1 | <...> | AC-1 | coding | - |
 | task2 | <...> | AC-2 | analyze | task1 |
 
+## Codex Team Workflow
+
+### Batch 1 - Planning Codex
+- Input: raw draft + repository context
+- Output: risk map, missing requirements, and plan critiques (Codex Analysis v1)
+
+### Batch 2 - Implementation Codex Team
+- Input: converged plan + concise implementation handoff summary
+- Output: implementation changes aligned to ACs and task dependencies
+- Handoff Summary:
+  - Scope:
+  - Key Constraints:
+  - High-Risk Areas:
+  - Required Validations:
+
+### Batch 3 - Review Codex Team
+- Input: implementation summaries and changed files
+- Output: independent quality review, risk checks, and final readiness verdict
+
 ## Claude-Codex Deliberation
 
 ### Agreements
@@ -374,6 +424,8 @@ Each task MUST include exactly one routing tag generated by the planning agent:
 
 14. **Task Tag Requirement**: The plan MUST include `## Task Breakdown`, and every task MUST be tagged as either `coding` or `analyze` (no untagged tasks, no other tag values).
 
+15. **Three-Batch Codex Workflow Requirement**: The plan MUST include `## Codex Team Workflow` and explicitly define Batch 1 (planning), Batch 2 (implementation handoff), and Batch 3 (independent review).
+
 ---
 
 ## Phase 8: Write and Complete
@@ -413,7 +465,26 @@ If multiple languages are detected:
    - Use the Edit tool to apply the translations
 3. If the user declines, leave the document as-is
 
-### Step 4: Report Results
+### Step 4: Optional Direct Work Start
+
+If all of the following are true:
+- `AUTO_START_RLCR_IF_CONVERGED=true`
+- `PLAN_CONVERGENCE_STATUS=converged`
+- There are no pending decisions with status `PENDING`
+
+Then start work immediately by running:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/setup-rlcr-loop.sh" --plan-file <output-plan-path>
+```
+
+If the auto-start command fails, report the failure reason and provide the exact manual fallback command:
+
+```bash
+/humanize:start-rlcr-loop <output-plan-path>
+```
+
+### Step 5: Report Results
 
 Report to the user:
 - Path to the generated plan
@@ -422,6 +493,7 @@ Report to the user:
 - Number of convergence rounds executed
 - Number of unresolved user decisions (if any)
 - Whether language was unified (if applicable)
+- Whether direct work start was attempted, and its result
 
 ---
 
@@ -430,6 +502,10 @@ Report to the user:
 If issues arise during plan generation that require user input:
 - Use AskUserQuestion to clarify
 - Document any user decisions in the plan's context
+
+If auto-start mode is enabled but convergence conditions are not met:
+- Explain why direct start was skipped
+- Tell the user to either resolve pending decisions or run `/humanize:start-rlcr-loop <plan.md>` manually
 
 If unable to generate a complete plan:
 - Explain what information is missing
