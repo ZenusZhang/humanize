@@ -5,7 +5,7 @@
 # Creates state files for the loop that uses Codex to review Claude's work.
 #
 # Usage:
-#   setup-rlcr-loop.sh <path/to/plan.md> [--max N] [--codex-model MODEL:EFFORT]
+#   setup-rlcr-loop.sh <path/to/plan.md> [--plan-type coding|design] [--max N] [--codex-model MODEL:EFFORT]
 #
 
 set -euo pipefail
@@ -50,6 +50,88 @@ ASK_CODEX_QUESTION="true"
 AGENT_TEAMS="false"
 WORKTREE_TEAMS="false"
 WORKTREE_ROOT=""
+PLAN_TYPE=""
+PLAN_TYPE_SOURCE="default"
+IMPLEMENTATION_AGENT="claude"
+
+normalize_plan_type() {
+    local raw="$1"
+    # Normalize case and strip whitespace for predictable matching.
+    raw=$(echo "$raw" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+    case "$raw" in
+        coding|code|implementation|impl)
+            echo "coding"
+            ;;
+        design|analysis|requirement|requirements|design-analysis|analysis-design|design_analysis|requirement-analysis)
+            echo "design"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
+extract_plan_type_from_metadata() {
+    local plan_path="$1"
+    local candidate=""
+
+    # Support YAML-style metadata line anywhere in the document.
+    candidate=$(grep -Ei -m1 '^[[:space:]]*(plan_type|plan-type)[[:space:]]*:[[:space:]]*[A-Za-z_-]+' "$plan_path" 2>/dev/null | sed -E 's/^[[:space:]]*(plan_type|plan-type)[[:space:]]*:[[:space:]]*//I' | tr -d '\r' || true)
+    if [[ -n "$candidate" ]]; then
+        normalize_plan_type "$candidate"
+        return
+    fi
+
+    # Support markdown section:
+    # ## Plan Type
+    # design
+    candidate=$(awk '
+        BEGIN { in_section=0 }
+        /^##[[:space:]]*[Pp]lan[[:space:]]*[Tt]ype[[:space:]]*$/ { in_section=1; next }
+        in_section==1 {
+            if ($0 ~ /^##[[:space:]]+/) { exit }
+            if ($0 ~ /^[[:space:]]*$/) { next }
+            line=$0
+            gsub(/^[[:space:]]*[-*]?[[:space:]]*/, "", line)
+            gsub(/`/, "", line)
+            print line
+            exit
+        }
+    ' "$plan_path" 2>/dev/null || true)
+
+    if [[ -n "$candidate" ]]; then
+        normalize_plan_type "$candidate"
+        return
+    fi
+
+    echo ""
+}
+
+detect_plan_type() {
+    local plan_path="$1"
+    local explicit_type=""
+    local design_hits=0
+    local coding_hits=0
+
+    explicit_type=$(extract_plan_type_from_metadata "$plan_path")
+    if [[ -n "$explicit_type" ]]; then
+        PLAN_TYPE_SOURCE="plan-metadata"
+        echo "$explicit_type"
+        return
+    fi
+
+    # Lightweight heuristic fallback for plans without explicit type markers.
+    design_hits=$(grep -Eio '(design|analysis|analyze|architecture|requirement|requirements|specification|feasibility|discovery|rfc)' "$plan_path" 2>/dev/null | wc -l | tr -d ' ')
+    coding_hits=$(grep -Eio '(code|coding|implement|implementation|refactor|fix|bug|test|tests|function|module|api|endpoint)' "$plan_path" 2>/dev/null | wc -l | tr -d ' ')
+
+    if [[ "$design_hits" -ge 3 ]] && [[ "$design_hits" -gt "$coding_hits" ]]; then
+        PLAN_TYPE_SOURCE="heuristic"
+        echo "design"
+    else
+        PLAN_TYPE_SOURCE="heuristic"
+        echo "coding"
+    fi
+}
 
 show_help() {
     cat << 'HELP_EOF'
@@ -64,6 +146,7 @@ ARGUMENTS:
 
 OPTIONS:
   --plan-file <path>   Explicit plan file path (alternative to positional arg)
+  --plan-type <TYPE>   Plan routing type: coding or design (default: auto-detect, fallback coding)
   --track-plan-file    Indicate plan file should be tracked in git (must be clean)
   --max <N>            Maximum iterations before auto-stop (default: 42)
   --codex-model <MODEL:EFFORT>
@@ -104,7 +187,7 @@ DESCRIPTION:
   3. Has two phases: Implementation Phase and Review Phase
 
   The flow:
-  1. Claude works on the plan (Implementation Phase)
+  1. Implementation agent works on the plan (Claude for coding plans, Codex for design plans)
   2. Claude writes a summary to round-N-summary.md
   3. On exit attempt, Codex reviews the summary
   4. If Codex finds issues, it blocks exit and sends feedback
@@ -115,6 +198,7 @@ DESCRIPTION:
 
 EXAMPLES:
   /humanize:start-rlcr-loop docs/feature-plan.md
+  /humanize:start-rlcr-loop docs/design.md --plan-type design
   /humanize:start-rlcr-loop docs/impl.md --max 20
   /humanize:start-rlcr-loop plan.md --codex-model gpt-5.3-codex:xhigh
   /humanize:start-rlcr-loop plan.md --codex-timeout 7200  # 2 hour timeout
@@ -192,6 +276,20 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             PLAN_FILE_EXPLICIT="$2"
+            shift 2
+            ;;
+        --plan-type)
+            if [[ -z "${2:-}" ]]; then
+                echo "Error: --plan-type requires a value (coding|design)" >&2
+                exit 1
+            fi
+            PLAN_TYPE=$(normalize_plan_type "$2")
+            if [[ -z "$PLAN_TYPE" ]]; then
+                echo "Error: Invalid --plan-type value: $2" >&2
+                echo "  Allowed values: coding, design" >&2
+                exit 1
+            fi
+            PLAN_TYPE_SOURCE="user-flag"
             shift 2
             ;;
         --track-plan-file)
@@ -641,6 +739,31 @@ else
     LINE_COUNT=0
 fi  # End of skip-impl plan file content validation skip
 
+# ========================================
+# Plan Type Routing
+# ========================================
+
+if [[ -z "$PLAN_TYPE" ]]; then
+    if [[ -n "$FULL_PLAN_PATH" ]]; then
+        PLAN_TYPE=$(detect_plan_type "$FULL_PLAN_PATH")
+    else
+        PLAN_TYPE="coding"
+        PLAN_TYPE_SOURCE="default"
+    fi
+fi
+
+if [[ -z "$PLAN_TYPE" ]]; then
+    PLAN_TYPE="coding"
+    PLAN_TYPE_SOURCE="default"
+fi
+
+if [[ "$PLAN_TYPE" == "design" ]]; then
+    IMPLEMENTATION_AGENT="codex"
+else
+    PLAN_TYPE="coding"
+    IMPLEMENTATION_AGENT="claude"
+fi
+
 # Check codex is available
 if ! command -v codex &>/dev/null; then
     echo "Error: start-rlcr-loop requires codex to run" >&2
@@ -882,6 +1005,7 @@ codex_timeout: $CODEX_TIMEOUT
 push_every_round: $PUSH_EVERY_ROUND
 full_review_round: $FULL_REVIEW_ROUND
 plan_file: $PLAN_FILE
+plan_type: $PLAN_TYPE
 plan_tracked: $TRACK_PLAN_FILE
 start_branch: $START_BRANCH
 base_branch: $BASE_BRANCH
@@ -1106,6 +1230,26 @@ You are strictly prohibited from only addressing the most important issues - you
 
 EOF
 
+if [[ "$PLAN_TYPE" == "design" ]]; then
+    cat >> "$LOOP_DIR/round-0-prompt.md" << 'EOF'
+
+## Execution Routing (Plan Type: design-analysis)
+
+This plan is design/analysis oriented. Task execution owner is **Codex**.
+You should act as the coordinator and use `/humanize:ask-codex` for each active task.
+
+For every task:
+1. Write a focused Codex request that includes relevant context and expected output format.
+2. Run `/humanize:ask-codex` to get Codex's implementation/analysis output.
+3. Apply Codex's output into project artifacts (docs/specs/decision records/code if required by plan).
+4. If output is ambiguous or incomplete, iterate with a follow-up Codex request before moving on.
+
+Do not silently skip tasks. If Codex cannot complete a task, document the blocker explicitly in your summary.
+
+---
+EOF
+fi
+
 # Append plan content directly (avoids command substitution size limits for large files)
 cat "$LOOP_DIR/plan.md" >> "$LOOP_DIR/round-0-prompt.md"
 
@@ -1205,6 +1349,7 @@ if [[ "$SKIP_IMPL" == "true" ]]; then
 === start-rlcr-loop activated (SKIP-IMPL MODE) ===
 
 Mode: Code Review Only (--skip-impl)
+Plan Type: $PLAN_TYPE (source: $PLAN_TYPE_SOURCE)
 Start Branch: $START_BRANCH
 Base Branch: $BASE_BRANCH
 Codex Model: $CODEX_MODEL
@@ -1230,6 +1375,8 @@ else
 === start-rlcr-loop activated ===
 
 Plan File: $PLAN_FILE ($LINE_COUNT lines)
+Plan Type: $PLAN_TYPE (source: $PLAN_TYPE_SOURCE)
+Implementation Agent: $IMPLEMENTATION_AGENT
 Plan Tracked: $TRACK_PLAN_FILE
 Start Branch: $START_BRANCH
 Base Branch: $BASE_BRANCH
