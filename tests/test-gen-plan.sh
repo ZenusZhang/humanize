@@ -134,6 +134,34 @@ else
     fail "gen-plan command requires pending user decisions section" "Pending User Decisions section" "missing"
 fi
 
+if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "## Phase 3: Codex First-Pass Analysis" "$GEN_PLAN_CMD"; then
+    pass "gen-plan command includes codex first-pass analysis phase"
+else
+    fail "gen-plan command includes codex first-pass analysis phase" "Phase 3 codex first-pass section" "missing"
+fi
+
+if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "## Phase 5: Iterative Convergence Loop" "$GEN_PLAN_CMD"; then
+    pass "gen-plan command includes iterative convergence loop phase"
+else
+    fail "gen-plan command includes iterative convergence loop phase" "Phase 5 convergence loop section" "missing"
+fi
+
+if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "Maximum 5 rounds reached" "$GEN_PLAN_CMD"; then
+    pass "gen-plan command defines convergence loop termination limit"
+else
+    fail "gen-plan command defines convergence loop termination limit" "Maximum 5 rounds reached" "missing"
+fi
+
+if [[ -f "$GEN_PLAN_CMD" ]]; then
+    PHASE3_LINE=$(grep -n "## Phase 3: Codex First-Pass Analysis" "$GEN_PLAN_CMD" | head -1 | cut -d: -f1 || true)
+    PHASE4_LINE=$(grep -n "## Phase 4: Claude Candidate Plan (v1)" "$GEN_PLAN_CMD" | head -1 | cut -d: -f1 || true)
+    if [[ -n "$PHASE3_LINE" && -n "$PHASE4_LINE" && "$PHASE3_LINE" -lt "$PHASE4_LINE" ]]; then
+        pass "gen-plan command orders codex analysis before claude candidate plan"
+    else
+        fail "gen-plan command orders codex analysis before claude candidate plan" "Phase 3 line < Phase 4 line" "phase3=$PHASE3_LINE phase4=$PHASE4_LINE"
+    fi
+fi
+
 if [[ -f "$PLAN_TEMPLATE" ]] && grep -q "## Claude-Codex Deliberation" "$PLAN_TEMPLATE"; then
     pass "plan template includes Claude-Codex deliberation section"
 else
@@ -144,6 +172,12 @@ if [[ -f "$PLAN_TEMPLATE" ]] && grep -q "## Pending User Decisions" "$PLAN_TEMPL
     pass "plan template includes pending user decisions section"
 else
     fail "plan template includes pending user decisions section" "Pending User Decisions section" "missing"
+fi
+
+if [[ -f "$PLAN_TEMPLATE" ]] && grep -q "## Convergence Log" "$PLAN_TEMPLATE"; then
+    pass "plan template includes convergence log section"
+else
+    fail "plan template includes convergence log section" "Convergence Log section" "missing"
 fi
 
 # ----------------------------------------

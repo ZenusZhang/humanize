@@ -74,6 +74,12 @@ Example: "The implementation includes core feature X with basic validation"
 ### Resolved Disagreements
 - <Topic>: Claude vs Codex summary, chosen resolution, and rationale
 
+## Convergence Log
+
+- Round 1: <Second Codex objections and Claude revisions>
+- Round 2: <Remaining disagreements and updates>
+- Final Status: `converged` or `partially_converged`
+
 ## Pending User Decisions
 
 - DEC-1: <Decision topic>
