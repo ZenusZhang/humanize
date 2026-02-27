@@ -169,3 +169,46 @@ swarm_backend_shutdown <loop_dir>
 - `--swarm-backend openai_agents` 可成功执行至少一个 `analyze` 任务并落盘结果。
 - 后端失败时，`swarm_failover=native` 能自动回退并完成任务。
 - `events.ndjson` 与错误日志可用于复盘一次失败。
+
+---
+
+## 7) 任务委派（Codex 执行分工）
+
+### 7.1 角色与负责人
+
+- **Codex-1（接口与状态）**
+  - 负责 `scripts/setup-rlcr-loop.sh`：新增 `--swarm-backend/--swarm-config/--swarm-failover` 参数解析与状态字段写入。
+  - 同步更新 `commands/start-rlcr-loop.md` 的参数说明。
+- **Codex-2（后端分发骨架）**
+  - 负责新增 `scripts/lib/swarm-backend.sh`：统一契约、backend dispatch、failover 决策入口。
+  - 落地 `native` 基线路径，保证行为与当前一致。
+- **Codex-3（analyze 路由接线）**
+  - 负责修改 `hooks/loop-codex-stop-hook.sh`：在 analyze 路由调用 `swarm_backend_run_analyze`。
+  - 衔接失败日志与 `swarm_last_error` 更新流程。
+- **Codex-4（openai_agents 执行器）**
+  - 负责新增 `scripts/swarm/openai_agents_runner.py`：读取 prompt、调用 Agents SDK、输出标准 Markdown。
+  - 与 Codex-2 对齐 runner 入参/出参约定。
+- **Codex-5（claude_swarm 预集成）**
+  - 负责新增 `scripts/swarm/claude_swarm_runner.sh` stub：返回 not implemented、输出可审计日志。
+  - 加入实验开关与基础配置校验（不接管全流程）。
+- **Codex-6（文档）**
+  - 负责新增 `docs/swarm-backend.md`（参数、配置、故障排查）。
+  - 更新 `README.md` 中 Swarm backend MVP 行为说明。
+- **Codex-7（测试）**
+  - 负责新增 `tests/test-swarm-backend.sh`（分发、回退、状态字段、日志产物）。
+  - 修改 `tests/run-all-tests.sh`，纳入新测试并保证默认测试入口可执行。
+
+### 7.2 执行顺序（依赖）
+
+1. Codex-1 与 Codex-2 并行起步（接口参数 + 分发骨架）。
+2. Codex-3 在 Codex-2 的函数契约稳定后接线 analyze 路由。
+3. Codex-4/Codex-5 分别接入 openai_agents 与 claude_swarm stub。
+4. Codex-6 在参数与行为基本稳定后补全文档。
+5. Codex-7 最后收敛测试并补回归。
+
+### 7.3 Reviewer 指派
+
+- **Codex-Reviewer（最终审阅负责人）**
+  - 独立于上述 7 个执行 Codex，不直接提交实现代码。
+  - 审查范围：接口契约一致性、failover 安全性、日志与状态完整性、测试覆盖和文档一致性。
+  - 合并前 gate：`tests/run-all-tests.sh` 必须通过，且 openai_agents 失败回退场景有可复盘日志。
