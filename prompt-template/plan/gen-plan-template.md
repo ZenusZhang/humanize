@@ -1,4 +1,9 @@
-# <Plan Title>
+# <Chinese Plan Title> / <English Plan Title>
+
+## Language Format
+Default: bilingual Simplified Chinese + English.
+Rendering pattern for headings and key statements: <Chinese text> / <English text>
+Keep identifiers (`AC-1`, task IDs, file paths, API names, command flags) unchanged.
 
 ## Goal Description
 <Clear, direct description of what needs to be accomplished>

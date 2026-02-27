@@ -248,7 +248,7 @@ Workflow:
 4. Claude produces candidate plan v1 and implementation handoff summary
 5. Claude and a second Codex iterate reasonability review until convergence conditions are met
 6. Optional manual review gate: user resolves unresolved opposite opinions unless auto-start mode skips it after convergence
-7. Generates a structured plan.md with AC-X acceptance criteria, task tags (`coding`/`analyze`), and three-batch Codex workflow (plan -> implement -> review)
+7. Generates a structured plan.md with default bilingual (Simplified Chinese + English) content, AC-X acceptance criteria, task tags (`coding`/`analyze`), and three-batch Codex workflow (plan -> implement -> review)
 ```
 
 #### start-pr-loop
