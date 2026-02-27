@@ -18,6 +18,7 @@ source "$SCRIPT_DIR/test-helpers.sh"
 
 SETUP_SCRIPT="$PROJECT_ROOT/scripts/setup-rlcr-loop.sh"
 STOP_HOOK="$PROJECT_ROOT/hooks/loop-codex-stop-hook.sh"
+BITLESSON_TEMPLATE_FILE="$PROJECT_ROOT/templates/bitlesson.md"
 
 echo "=========================================="
 echo "BitLesson Workflow Tests"
@@ -50,23 +51,23 @@ MOCK_EOF
 # Test 1: BitLesson assets exist and are structured
 # ========================================
 
-if [[ -f "$PROJECT_ROOT/bitlesson.md" ]]; then
-    pass "bitlesson.md exists in repository root"
+if [[ -f "$BITLESSON_TEMPLATE_FILE" ]]; then
+    pass "bitlesson template exists in templates directory"
 else
-    fail "bitlesson.md exists in repository root" "file exists" "not found"
+    fail "bitlesson template exists in templates directory" "file exists" "not found"
 fi
 
-if [[ -f "$PROJECT_ROOT/bitlesson.md" ]] && \
-   grep -q "Lesson ID" "$PROJECT_ROOT/bitlesson.md" && \
-   grep -q "Problem Description" "$PROJECT_ROOT/bitlesson.md" && \
-   grep -q "Root Cause" "$PROJECT_ROOT/bitlesson.md" && \
-   grep -q "Solution" "$PROJECT_ROOT/bitlesson.md" && \
-   grep -q "Constraints" "$PROJECT_ROOT/bitlesson.md" && \
-   grep -q "Validation Evidence" "$PROJECT_ROOT/bitlesson.md" && \
-   grep -q "Source Rounds" "$PROJECT_ROOT/bitlesson.md"; then
-    pass "bitlesson.md contains strict lesson schema fields"
+if [[ -f "$BITLESSON_TEMPLATE_FILE" ]] && \
+   grep -q "Lesson ID" "$BITLESSON_TEMPLATE_FILE" && \
+   grep -q "Problem Description" "$BITLESSON_TEMPLATE_FILE" && \
+   grep -q "Root Cause" "$BITLESSON_TEMPLATE_FILE" && \
+   grep -q "Solution" "$BITLESSON_TEMPLATE_FILE" && \
+   grep -q "Constraints" "$BITLESSON_TEMPLATE_FILE" && \
+   grep -q "Validation Evidence" "$BITLESSON_TEMPLATE_FILE" && \
+   grep -q "Source Rounds" "$BITLESSON_TEMPLATE_FILE"; then
+    pass "bitlesson template contains strict lesson schema fields"
 else
-    fail "bitlesson.md contains strict lesson schema fields" "all required fields" "missing one or more"
+    fail "bitlesson template contains strict lesson schema fields" "all required fields" "missing one or more"
 fi
 
 SELECTOR_FILE="$PROJECT_ROOT/agents/bitlesson-selector.md"
