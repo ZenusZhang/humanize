@@ -19,6 +19,16 @@ Below is Codex's review result:
 <!-- CODEX's REVIEW RESULT  END  -->
 ---
 
+## BitLesson Selection (REQUIRED BEFORE EXECUTION)
+
+Before executing any task or sub-task in this round:
+- Read @{{BITLESSON_FILE}}
+- Run `bitlesson-selector` with sub-task + related paths + `bitlesson.md`
+- Apply selected lesson IDs (or `NONE`) during implementation
+- If a problem is solved only after multiple rounds, add/update the lesson entry in `bitlesson.md`
+
+---
+
 ## Goal Tracker Reference (READ-ONLY after Round 0)
 
 Before starting work, **read** @{{GOAL_TRACKER_FILE}} to understand:

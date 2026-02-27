@@ -8,10 +8,11 @@ You are in the **Review Phase**. Codex has performed a code review and found iss
 
 ## Instructions
 
-1. **Address all issues** marked with `[P0-9]` severity markers
-2. **Focus on fixes only** - do not add new features or make unrelated changes
-3. **Commit your changes** after fixing the issues
-4. **Write your summary** to: `{{SUMMARY_FILE}}`
+1. **Read `bitlesson.md` and run `bitlesson-selector`** for each fix task/sub-task before coding
+2. **Address all issues** marked with `[P0-9]` severity markers
+3. **Focus on fixes only** - do not add new features or make unrelated changes
+4. **Commit your changes** after fixing the issues
+5. **Write your summary** to: `{{SUMMARY_FILE}}`
 
 ## Summary Template
 
@@ -19,6 +20,7 @@ Your summary should include:
 - Which issues were fixed
 - How each issue was resolved
 - Any issues that could not be resolved (with explanation)
+- A `## BitLesson Delta` section with `Action: none|add|update`
 
 ## Important Notes
 

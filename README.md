@@ -113,6 +113,14 @@ The loop has two phases:
    - `analyze` tag -> execute via `/humanize:ask-codex`
 2. **Review Phase**: `codex review --base <branch>` checks code quality with `[P0-9]` severity markers
 
+### BitLesson Workflow (Project-Level Knowledge)
+
+RLCR also uses a project-level `bitlesson.md` (in repository root) for reusable problem/solution lessons:
+- If missing, `start-rlcr-loop` initializes `bitlesson.md` automatically from the strict template.
+- Before each task/sub-task, run `bitlesson-selector` and apply selected lesson IDs (or `NONE`).
+- Every round summary must include `## BitLesson Delta` with `Action: none|add|update`.
+- If a problem is solved only after multiple rounds, add/update a precise entry in `bitlesson.md`.
+
 ### Quick Start
 
 1. **Create a plan file** or just write down your thoughts in `<name/you/like/for/draft>.md` and use `/humanize:gen-plan`
@@ -173,6 +181,7 @@ OPTIONS:
 ```
 
 Plan expectation: each task should include a routing tag (`coding` or `analyze`) generated during `/humanize:gen-plan`.
+Each project should maintain `bitlesson.md`; `start-rlcr-loop` auto-initializes it if missing.
 
 #### Parallel Worktree Teams (Scheduler/Worker/Reviewer)
 

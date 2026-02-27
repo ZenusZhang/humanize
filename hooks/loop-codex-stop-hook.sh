@@ -94,6 +94,8 @@ RAW_FRONTMATTER=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$STATE_FILE" 2>/dev/
 RAW_CURRENT_ROUND=$(echo "$RAW_FRONTMATTER" | grep "^current_round:" || true)
 RAW_MAX_ITERATIONS=$(echo "$RAW_FRONTMATTER" | grep "^max_iterations:" || true)
 RAW_FULL_REVIEW_ROUND=$(echo "$RAW_FRONTMATTER" | grep "^full_review_round:" || true)
+RAW_BITLESSON_REQUIRED=$(echo "$RAW_FRONTMATTER" | grep "^bitlesson_required:" || true)
+RAW_BITLESSON_FILE=$(echo "$RAW_FRONTMATTER" | grep "^bitlesson_file:" || true)
 
 # Use tolerant parsing to extract values
 # Note: parse_state_file applies defaults for missing current_round/max_iterations
@@ -119,6 +121,24 @@ ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-false}"
 AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
 WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
 WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
+BITLESSON_REQUIRED="false"
+if [[ -n "$RAW_BITLESSON_REQUIRED" ]]; then
+    BITLESSON_REQUIRED=$(echo "$RAW_BITLESSON_REQUIRED" | sed 's/^bitlesson_required:[[:space:]]*//' | tr -d ' "')
+fi
+BITLESSON_FILE_REL="bitlesson.md"
+if [[ -n "$RAW_BITLESSON_FILE" ]]; then
+    BITLESSON_FILE_REL=$(echo "$RAW_BITLESSON_FILE" | sed 's/^bitlesson_file:[[:space:]]*//' | sed 's/^"//; s/"$//')
+fi
+if [[ -z "$BITLESSON_FILE_REL" ]] || \
+   [[ ! "$BITLESSON_FILE_REL" =~ ^[a-zA-Z0-9._/-]+$ ]] || \
+   [[ "$BITLESSON_FILE_REL" = /* ]] || \
+   [[ "$BITLESSON_FILE_REL" =~ (^|/)\.\.(/|$) ]]; then
+    BITLESSON_FILE_REL="bitlesson.md"
+fi
+BITLESSON_FILE="$PROJECT_ROOT/$BITLESSON_FILE_REL"
+if [[ "$BITLESSON_REQUIRED" != "true" && -f "$BITLESSON_FILE" ]]; then
+    BITLESSON_REQUIRED="true"
+fi
 WORKTREE_ROOT_SAFE="$WORKTREE_ROOT"
 if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
     while [[ "$WORKTREE_ROOT_SAFE" == ./* ]]; do
@@ -448,11 +468,11 @@ cleanup_stale_index_lock() {
 GIT_STATUS_CACHED=""
 GIT_IS_REPO=false
 
-if command -v git &>/dev/null && run_with_timeout "$GIT_TIMEOUT" git rev-parse --git-dir &>/dev/null 2>&1; then
+if command -v git &>/dev/null && run_with_timeout "$GIT_TIMEOUT" git -C "$PROJECT_ROOT" rev-parse --git-dir &>/dev/null 2>&1; then
     GIT_IS_REPO=true
     # Capture exit code to detect timeout/failure - do NOT use || echo "" which would fail-open
     GIT_STATUS_EXIT=0
-    GIT_STATUS_CACHED=$(run_with_timeout "$GIT_TIMEOUT" git status --porcelain 2>/dev/null) || GIT_STATUS_EXIT=$?
+    GIT_STATUS_CACHED=$(run_with_timeout "$GIT_TIMEOUT" git -C "$PROJECT_ROOT" status --porcelain 2>/dev/null) || GIT_STATUS_EXIT=$?
 
     if [[ $GIT_STATUS_EXIT -ne 0 ]]; then
         # Git status failed or timed out - fail-closed by blocking exit
@@ -624,10 +644,10 @@ Please commit all changes before exiting.
 
     if [[ "$PUSH_EVERY_ROUND" == "true" ]]; then
         # Check if local branch is ahead of remote (unpushed commits)
-        GIT_AHEAD=$(run_with_timeout "$GIT_TIMEOUT" git status -sb 2>/dev/null | grep -o 'ahead [0-9]*' || true)
+        GIT_AHEAD=$(run_with_timeout "$GIT_TIMEOUT" git -C "$PROJECT_ROOT" status -sb 2>/dev/null | grep -o 'ahead [0-9]*' || true)
         if [[ -n "$GIT_AHEAD" ]]; then
             AHEAD_COUNT=$(echo "$GIT_AHEAD" | grep -o '[0-9]*')
-            CURRENT_BRANCH=$(run_with_timeout "$GIT_TIMEOUT" git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+            CURRENT_BRANCH=$(run_with_timeout "$GIT_TIMEOUT" git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
             FALLBACK="# Unpushed Commits
 
@@ -687,6 +707,66 @@ Please write your work summary to: {{SUMMARY_FILE}}"
             "systemMessage": $msg
         }'
     exit 0
+fi
+
+# ========================================
+# Check BitLesson Delta Section (all non-finalize rounds)
+# ========================================
+
+if [[ "$IS_FINALIZE_PHASE" != "true" ]] && [[ "$BITLESSON_REQUIRED" == "true" ]]; then
+    HAS_BITLESSON_DELTA_HEADER=false
+    if grep -qi '^##[[:space:]]*BitLesson Delta[[:space:]]*$' "$SUMMARY_FILE"; then
+        HAS_BITLESSON_DELTA_HEADER=true
+    fi
+
+    if [[ "$HAS_BITLESSON_DELTA_HEADER" != "true" ]]; then
+        FALLBACK="# BitLesson Delta Missing
+
+Your summary is missing the required \`## BitLesson Delta\` section.
+
+Required minimal format:
+\`\`\`markdown
+## BitLesson Delta
+- Action: none|add|update
+- Lesson ID(s): <IDs or NONE>
+- Notes: <what changed and why>
+\`\`\`"
+        REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/bitlesson-delta-missing.md" "$FALLBACK")
+        jq -n \
+            --arg reason "$REASON" \
+            --arg msg "Loop: Summary missing BitLesson Delta section (round $CURRENT_ROUND)" \
+            '{
+                "decision": "block",
+                "reason": $reason,
+                "systemMessage": $msg
+            }'
+        exit 0
+    fi
+
+    BITLESSON_DELTA_BLOCK=$(awk '
+        BEGIN { in_delta=0 }
+        tolower($0) ~ /^##[[:space:]]*bitlesson delta[[:space:]]*$/ { in_delta=1; next }
+        in_delta && /^##[[:space:]]+/ { in_delta=0 }
+        in_delta { print }
+    ' "$SUMMARY_FILE")
+    if ! echo "$BITLESSON_DELTA_BLOCK" | grep -Eiq '\b(none|add|update)\b'; then
+        FALLBACK="# Invalid BitLesson Delta Action
+
+Your \`## BitLesson Delta\` section exists, but it must include one action:
+- \`none\`
+- \`add\`
+- \`update\`"
+        REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/bitlesson-delta-invalid.md" "$FALLBACK")
+        jq -n \
+            --arg reason "$REASON" \
+            --arg msg "Loop: BitLesson Delta must include action none/add/update (round $CURRENT_ROUND)" \
+            '{
+                "decision": "block",
+                "reason": $reason,
+                "systemMessage": $msg
+            }'
+        exit 0
+    fi
 fi
 
 # ========================================
@@ -1592,14 +1672,20 @@ NEXT_ROUND_FALLBACK="# Next Round Instructions
 
 Review the feedback below and address all issues.
 
+Before executing tasks in this round:
+1. Read @{{BITLESSON_FILE}}
+2. Run \`bitlesson-selector\` for each task/sub-task
+3. Follow selected lesson IDs (or \`NONE\`)
+
 ## Codex Review
 {{REVIEW_CONTENT}}
 
-Reference: {{PLAN_FILE}}, {{GOAL_TRACKER_FILE}}"
+Reference: {{PLAN_FILE}}, {{GOAL_TRACKER_FILE}}, {{BITLESSON_FILE}}"
 load_and_render_safe "$TEMPLATE_DIR" "claude/next-round-prompt.md" "$NEXT_ROUND_FALLBACK" \
     "PLAN_FILE=$PLAN_FILE" \
     "REVIEW_CONTENT=$REVIEW_CONTENT" \
-    "GOAL_TRACKER_FILE=$GOAL_TRACKER_FILE" > "$NEXT_PROMPT_FILE"
+    "GOAL_TRACKER_FILE=$GOAL_TRACKER_FILE" \
+    "BITLESSON_FILE=$BITLESSON_FILE" > "$NEXT_PROMPT_FILE"
 
 # Check for Open Questions in review content and inject notice if enabled
 # Detection: line containing "Open Question" substring with total length < 40 chars

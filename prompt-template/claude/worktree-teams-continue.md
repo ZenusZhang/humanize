@@ -12,4 +12,5 @@ Keep using scheduler/worker/reviewer worktree orchestration in this round.
    - assigned worktree path
    - assigned branch
    - file ownership boundary
-5. Require reviewer-agent signoff per lane before integrating changes.
+5. Ensure each worker runs `bitlesson-selector` for each sub-task and records selected lesson IDs (or `NONE`) in the lane report.
+6. Require reviewer-agent signoff per lane before integrating changes.

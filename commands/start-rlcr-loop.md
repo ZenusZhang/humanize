@@ -55,6 +55,19 @@ This loop uses a **Goal Tracker** to prevent goal drift across iterations:
 4. **No cheating**: Do not try to exit the loop by editing state files or running cancel commands
 5. **Trust the process**: Codex's feedback helps improve the implementation
 
+## BitLesson Workflow (Project Level)
+
+Each project must maintain its own `bitlesson.md` in project root.
+If missing, `start-rlcr-loop` initializes it automatically with a strict template.
+
+Per round requirements:
+1. Read `bitlesson.md` before execution
+2. Run `bitlesson-selector` for each task/sub-task
+3. Apply selected lesson IDs (or `NONE`) during implementation
+4. Include `## BitLesson Delta` in the round summary with `Action: none|add|update`
+
+If a problem is solved only after multiple rounds, add or update a precise lesson entry in `bitlesson.md` (specific problem + specific solution).
+
 ## Stopping the Loop
 
 - Reach the maximum iteration count

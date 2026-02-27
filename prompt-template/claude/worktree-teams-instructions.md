@@ -11,6 +11,7 @@ You are operating with explicit role separation:
 2. Assign each parallelizable lane to a dedicated worker and reviewer pair.
 3. Use isolated `git worktree` directories per lane to avoid silent overwrite conflicts.
 4. Never assign two active workers to the same file in parallel. If overlap is required, enforce order via `blockedBy`.
+5. For every worker task, require running `bitlesson-selector` before coding and record selected lesson IDs (or `NONE`) in the lane notes.
 
 Use this table format:
 
