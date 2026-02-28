@@ -221,6 +221,24 @@ fi
 # Save Input
 # ========================================
 
+# Every ask-codex invocation carries explicit cross-agent context so Codex
+# knows Claude is the counterpart reviewer/consumer in this workflow.
+CROSS_AGENT_CONTEXT=$(cat << 'CONTEXT_EOF'
+## Cross-Agent Review Context
+
+- You are **Codex (OpenAI)**.
+- The counterpart agent in this workflow is **Claude (Anthropic)**.
+- If you are asked to review/analyze implementation status, treat Claude as the default producer unless the prompt explicitly says otherwise.
+- Your output will be consumed and reviewed by Claude in the next step.
+CONTEXT_EOF
+)
+
+FINAL_PROMPT="$CROSS_AGENT_CONTEXT
+
+---
+
+$QUESTION"
+
 cat > "$SKILL_DIR/input.md" << EOF
 # Ask Codex Input
 
@@ -271,7 +289,7 @@ CODEX_STDERR_FILE="$CACHE_DIR/codex-run.log"
     echo "codex exec ${CODEX_EXEC_ARGS[*]} \"<prompt>\""
     echo ""
     echo "# Prompt content:"
-    echo "$QUESTION"
+    echo "$FINAL_PROMPT"
 } > "$CODEX_CMD_FILE"
 
 # ========================================
@@ -293,7 +311,7 @@ epoch_to_iso() {
 START_TIME=$(date +%s)
 
 CODEX_EXIT_CODE=0
-printf '%s' "$QUESTION" | run_with_timeout "$CODEX_TIMEOUT" codex exec "${CODEX_EXEC_ARGS[@]}" - \
+printf '%s' "$FINAL_PROMPT" | run_with_timeout "$CODEX_TIMEOUT" codex exec "${CODEX_EXEC_ARGS[@]}" - \
     > "$CODEX_STDOUT_FILE" 2> "$CODEX_STDERR_FILE" || CODEX_EXIT_CODE=$?
 
 END_TIME=$(date +%s)

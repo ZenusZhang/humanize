@@ -15,6 +15,7 @@ Since the code review was skipped, please manually verify your changes before fi
 ## Simplification (Optional)
 
 If time permits, use the `code-simplifier:code-simplifier` agent via the Task tool to simplify and refactor your code.
+When invoking the agent, include explicit cross-agent context in the Task prompt (for example: "this output may be spot-checked by Codex; preserve behavior and provide auditable rationale").
 
 Focus more on changes between branch from `{{BASE_BRANCH}}` to `{{START_BRANCH}}`.
 

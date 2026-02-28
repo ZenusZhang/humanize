@@ -54,6 +54,7 @@ This loop uses a **Goal Tracker** to prevent goal drift across iterations:
 3. **Be thorough**: Include details about what was implemented, files changed, and tests added
 4. **No cheating**: Do not try to exit the loop by editing state files or running cancel commands
 5. **Trust the process**: Codex's feedback helps improve the implementation
+6. **Sub-agent context is mandatory**: Every sub-agent call must explicitly mention Claude/Codex relationship ("output reviewed by Codex" or "reviewing Codex-produced findings/results")
 
 ## BitLesson Workflow (Project Level)
 

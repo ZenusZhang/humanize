@@ -1112,11 +1112,14 @@ Do not try to execute anything to trigger the review - just stop and it will run
 
 1. Read @$BITLESSON_FILE before applying any fixes
 2. For each fix task/sub-task, run the \`bitlesson-selector\` agent first and apply selected lesson IDs (or \`NONE\`)
-3. Review your current work
-4. When ready, try to exit - Codex will review your code
-5. Fix any issues Codex finds
-6. Repeat until no issues remain
-7. Enter finalize phase for code simplification
+3. For every sub-agent invocation, include explicit Claude/Codex context in the prompt:
+   - "your output will be reviewed by Codex", or
+   - "you are reviewing Codex-produced findings/results"
+4. Review your current work
+5. When ready, try to exit - Codex will review your code
+6. Fix any issues Codex finds
+7. Repeat until no issues remain
+8. Enter finalize phase for code simplification
 
 ## Note
 
@@ -1171,6 +1174,12 @@ Before executing any task or sub-task:
 For all tasks that need to be completed, please use the Task system (TaskCreate, TaskUpdate, TaskList) to track each item in order of importance.
 You are strictly prohibited from only addressing the most important issues - you MUST create Tasks for ALL discovered issues and attempt to resolve each one.
 
+## Sub-Agent Cross-Review Protocol (MANDATORY)
+
+For every sub-agent invocation in this round (Task agents, \`bitlesson-selector\`, code-simplifier, etc.), include explicit Claude/Codex context in the prompt:
+- Either: "Your output will be reviewed by Codex."
+- Or: "You are reviewing Codex-produced findings/results."
+
 ## Task Tag Routing (MUST FOLLOW)
 
 Each task must have one routing tag from the plan: \`coding\` or \`analyze\`.
@@ -1204,6 +1213,7 @@ You are operating in **Agent Teams mode** as the **Team Leader**.
 Split tasks into independent units, create agent teams to execute them, and coordinate team members.
 Do NOT do implementation work yourself - delegate all coding to team members.
 Prevent overlapping changes by assigning clear file ownership boundaries.
+Every Task prompt must include explicit Claude/Codex cross-review context.
 AGENT_TEAMS_EOF
     fi
 fi
@@ -1222,6 +1232,7 @@ if [[ "$WORKTREE_TEAMS" == "true" ]]; then
 You are the scheduler. Explicitly mark every task as parallelizable (`yes` or `no`), then assign
 parallelizable tasks to isolated `git worktree` lanes for worker/reviewer pairs.
 Use `scripts/setup-worktree-teams.sh` to provision worktrees and record assignments before coding.
+Each worker/reviewer Task prompt must explicitly state Claude/Codex cross-review context.
 WORKTREE_TEAMS_EOF
     fi
 fi
@@ -1253,7 +1264,7 @@ Throughout your work, you MUST maintain the Goal Tracker:
 Note: You MUST NOT try to exit \`start-rlcr-loop\` loop by lying or edit loop state file or try to execute \`cancel-rlcr-loop\`
 
 After completing the work, please:
-0. If you have access to the \`code-simplifier\` agent, use it to review and optimize the code you just wrote
+0. If you have access to the \`code-simplifier\` agent, use it to review and optimize the code you just wrote. Include explicit Claude/Codex cross-review context in that sub-agent prompt.
 1. Finalize @$GOAL_TRACKER_FILE (this is Round 0, so you are initializing it - see "Goal Tracker Setup" above)
 2. Commit your changes with a descriptive commit message
 3. Write your work summary into @$SUMMARY_PATH

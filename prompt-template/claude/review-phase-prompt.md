@@ -9,10 +9,13 @@ You are in the **Review Phase**. Codex has performed a code review and found iss
 ## Instructions
 
 1. **Read `bitlesson.md` and run `bitlesson-selector`** for each fix task/sub-task before coding
-2. **Address all issues** marked with `[P0-9]` severity markers
-3. **Focus on fixes only** - do not add new features or make unrelated changes
-4. **Commit your changes** after fixing the issues
-5. **Write your summary** to: `{{SUMMARY_FILE}}`
+2. **Sub-agent calls must include cross-agent context**:
+   - implementation/exploration: "your output will be reviewed by Codex"
+   - review over Codex artifacts: "you are reviewing Codex-produced findings/results"
+3. **Address all issues** marked with `[P0-9]` severity markers
+4. **Focus on fixes only** - do not add new features or make unrelated changes
+5. **Commit your changes** after fixing the issues
+6. **Write your summary** to: `{{SUMMARY_FILE}}`
 
 ## Summary Template
 

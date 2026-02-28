@@ -1,5 +1,11 @@
 # Code Review - Round {{CURRENT_ROUND}}
 
+## Cross-Agent Review Context
+
+- You are **Codex (OpenAI)**.
+- You are reviewing implementation evidence produced by **Claude (Anthropic)**.
+- Your output will be consumed by Claude in the next iteration, so feedback must be directly executable.
+
 ## Original Implementation Plan
 
 **IMPORTANT**: The original plan that Claude is implementing is located at:

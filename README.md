@@ -113,6 +113,13 @@ The loop has two phases:
    - `analyze` tag -> execute via `/humanize:ask-codex`
 2. **Review Phase**: `codex review --base <branch>` checks code quality with `[P0-9]` severity markers
 
+### Sub-Agent Cross-Review Protocol
+
+For every sub-agent call, include explicit cross-vendor context:
+- Claude-side sub-agent calls must state that output will be reviewed by Codex.
+- Codex-side calls must state that Codex is reviewing/analyzing Claude-produced material (or user draft) and Claude will consume the result.
+- If the sub-agent is reviewing another side's output, explicitly name both sides (`Claude` and `Codex`).
+
 ### BitLesson Workflow (Project-Level Knowledge)
 
 RLCR also uses a project-level `bitlesson.md` (in repository root) for reusable problem/solution lessons:

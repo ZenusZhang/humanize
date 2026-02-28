@@ -7,6 +7,7 @@ You are now in the **Finalize Phase**. This is your opportunity to simplify and 
 ## Your Task
 
 Use the `code-simplifier:code-simplifier` agent via the Task tool to review and simplify the recent code changes.
+When invoking the agent, include explicit cross-agent context in the Task prompt (for example: "this output may be spot-checked by Codex; preserve behavior and provide auditable rationale").
 
 Example invocation:
 ```

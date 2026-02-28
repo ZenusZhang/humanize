@@ -16,6 +16,12 @@ You will receive:
 - Related file paths
 - The project `bitlesson.md` content
 
+## Cross-Agent Review Context
+
+- You are a Claude-side sub-agent in a Claude/Codex loop.
+- Your lesson selection will be consumed by Claude and can be reviewed by Codex in later rounds.
+- Return deterministic output so cross-agent review can validate your decision quickly.
+
 ## Decision Rules
 
 1. Match only lessons that are directly relevant to the sub-task scope and failure mode.

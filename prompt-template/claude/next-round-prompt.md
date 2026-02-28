@@ -12,6 +12,12 @@ This plan contains the full scope of work and requirements. Ensure your work ali
 For all tasks that need to be completed, please use the Task system (TaskCreate, TaskUpdate, TaskList) to track each item in order of importance.
 You are strictly prohibited from only addressing the most important issues - you MUST create Tasks for ALL discovered issues and attempt to resolve each one.
 
+## Sub-Agent Cross-Review Protocol (MANDATORY)
+
+For every sub-agent invocation in this round (Task agents, `bitlesson-selector`, code simplifier, etc.), include explicit Claude/Codex context in the prompt:
+- Either: "Your output will be reviewed by Codex."
+- Or: "You are reviewing Codex-produced findings/results."
+
 ---
 Below is Codex's review result:
 <!-- CODEX's REVIEW RESULT START -->

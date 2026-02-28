@@ -12,6 +12,10 @@ You are operating with explicit role separation:
 3. Use isolated `git worktree` directories per lane to avoid silent overwrite conflicts.
 4. Never assign two active workers to the same file in parallel. If overlap is required, enforce order via `blockedBy`.
 5. For every worker task, require running `bitlesson-selector` before coding and record selected lesson IDs (or `NONE`) in the lane notes.
+6. When spawning worker agents, explicitly set `model: sonnet` in each Task tool invocation.
+7. In every worker/reviewer Task prompt, add explicit Claude/Codex context:
+   - worker/explorer: "your output will be reviewed by Codex"
+   - reviewer over Codex feedback: "you are reviewing Codex-produced findings/results"
 
 Use this table format:
 

@@ -13,4 +13,8 @@ Keep using scheduler/worker/reviewer worktree orchestration in this round.
    - assigned branch
    - file ownership boundary
 5. Ensure each worker runs `bitlesson-selector` for each sub-task and records selected lesson IDs (or `NONE`) in the lane report.
-6. Require reviewer-agent signoff per lane before integrating changes.
+6. Ensure worker Task invocations explicitly set `model: sonnet`.
+7. Require reviewer-agent signoff per lane before integrating changes.
+8. Ensure every Task prompt includes explicit Claude/Codex cross-review context:
+   - "your output will be reviewed by Codex", or
+   - "you are reviewing Codex-produced findings/results."

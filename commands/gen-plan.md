@@ -1,5 +1,6 @@
 ---
 description: "Generate implementation plan from draft document"
+model: opus
 argument-hint: "--input <path/to/draft.md> --output <path/to/plan.md> [--auto-start-rlcr-if-converged]"
 allowed-tools:
   - "Bash(${CLAUDE_PLUGIN_ROOT}/scripts/validate-gen-plan-io.sh:*)"
@@ -31,6 +32,14 @@ This command transforms a user's draft document into a well-structured implement
 7. **Issue and Disagreement Resolution**: Resolve unresolved opposite opinions (or skip manual review if converged and auto-start mode is enabled)
 8. **Final Plan Generation**: Generate the converged structured plan.md with task routing tags and Codex handoff sections
 9. **Write and Complete**: Write output file, optionally auto-start work, and report results
+
+## Cross-Agent Sub-Agent Protocol (MANDATORY)
+
+For **every** sub-agent invocation (Task sub-agents and `ask-codex` calls), include explicit cross-agent context in the prompt:
+
+- If the callee is Claude-family (Task agent): state that its output will be reviewed by **Codex**.
+- If the callee is Codex (`ask-codex`): state that Codex is reviewing/analyzing material prepared by **Claude** (or user draft) and its output will be reviewed by Claude.
+- If the callee is reviewing another model's output, explicitly name both sides (`Claude` vs `Codex`) in one short context block.
 
 ---
 
@@ -76,6 +85,7 @@ After IO validation passes, check if the draft is relevant to this repository.
    Task tool parameters:
    - model: "haiku"
    - prompt: Include the draft content and ask the agent to:
+     0. A cross-agent context line: "Your output will be reviewed by Codex in the next planning stages."
      1. Explore the repository structure (README, CLAUDE.md, main files)
      2. Analyze if the draft content relates to this repository
      3. Return either `RELEVANT: <reason>` or `NOT_RELEVANT: <reason>`
@@ -101,6 +111,10 @@ This Codex pass is the **planning Codex batch (Batch 1)** in the multi-Codex wor
    "${CLAUDE_PLUGIN_ROOT}/scripts/ask-codex.sh" "<structured prompt>"
    ```
 2. The structured prompt MUST include:
+   - Cross-agent context block:
+     - "You are Codex; Claude is the counterpart agent."
+     - "You are analyzing draft + repo context for Claude's downstream planning."
+     - "Your output will be reviewed and integrated by Claude."
    - Repository context (project purpose, relevant files)
    - Raw draft content
    - Explicit request to critique assumptions, identify missing requirements, and propose stronger plan directions
@@ -154,6 +168,7 @@ Alongside candidate plan v1, prepare an **Implementation Handoff Draft** for lat
 ### Exploration Strategy
 
 Use the Task tool with `subagent_type: "Explore"` to investigate:
+- Include a cross-agent line in each Explore prompt: "Your findings will be reviewed by Codex in later planning/review rounds."
 - Components mentioned in the draft
 - Related files and directories
 - Existing patterns and conventions
@@ -173,6 +188,9 @@ After Claude candidate plan v1 is ready, run iterative challenge/refine rounds w
      "${CLAUDE_PLUGIN_ROOT}/scripts/ask-codex.sh" "<review current candidate plan>"
      ```
    - Prompt MUST include current candidate plan, prior disagreements, and unresolved items
+   - Prompt MUST include cross-agent context:
+     - "You are Codex reviewing a Claude-produced candidate plan."
+     - "Your response will be reviewed by Claude and used for plan revision."
    - Require output format:
      - `AGREE:` points accepted as reasonable
      - `DISAGREE:` points considered unreasonable and why

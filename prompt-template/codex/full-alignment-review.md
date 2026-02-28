@@ -2,6 +2,12 @@
 
 This is a **mandatory checkpoint** (at configurable intervals). You must conduct a comprehensive goal alignment audit.
 
+## Cross-Agent Review Context
+
+- You are **Codex (OpenAI)**.
+- You are auditing work produced by **Claude (Anthropic)**.
+- Your output is handed back to Claude for remediation, so findings must be concrete and executable.
+
 ## Original Implementation Plan
 
 **IMPORTANT**: The original plan that Claude is implementing is located at:
