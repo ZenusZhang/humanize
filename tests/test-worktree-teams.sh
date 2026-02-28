@@ -43,6 +43,24 @@ EOF
 }
 
 # ========================================
+# Test: worktree mode defaults to true when env var is enabled
+# ========================================
+
+setup_test_dir
+create_gitignored_plan_repo "$TEST_DIR/project"
+
+cd "$TEST_DIR/project"
+CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 CLAUDE_PROJECT_DIR="$TEST_DIR/project" \
+    bash "$SETUP_SCRIPT" temp/plan.md > /dev/null 2>&1 || true
+
+STATE_FILE=$(find "$TEST_DIR/project/.humanize/rlcr" -name "state.md" -type f 2>/dev/null | head -1)
+if [[ -n "$STATE_FILE" ]] && grep -q "^worktree_teams: true" "$STATE_FILE"; then
+    pass "worktree mode defaults to true when env var is enabled"
+else
+    fail "worktree mode defaults to true when env var is enabled" "worktree_teams: true" "$(grep '^worktree_teams:' "$STATE_FILE" 2>/dev/null || echo 'not found')"
+fi
+
+# ========================================
 # Test: --worktree-teams requires --agent-teams
 # ========================================
 
@@ -51,14 +69,15 @@ create_gitignored_plan_repo "$TEST_DIR/project"
 
 cd "$TEST_DIR/project"
 set +e
-SETUP_OUTPUT=$(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$SETUP_SCRIPT" --worktree-teams temp/plan.md 2>&1)
+SETUP_OUTPUT=$(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 CLAUDE_PROJECT_DIR="$TEST_DIR/project" \
+    bash "$SETUP_SCRIPT" --no-agent-teams --worktree-teams temp/plan.md 2>&1)
 SETUP_EXIT=$?
 set -e
 
 if [[ "$SETUP_EXIT" -ne 0 ]]; then
-    pass "--worktree-teams fails without --agent-teams"
+    pass "--worktree-teams fails when --no-agent-teams is set"
 else
-    fail "--worktree-teams fails without --agent-teams" "non-zero exit" "exit 0"
+    fail "--worktree-teams fails when --no-agent-teams is set" "non-zero exit" "exit 0"
 fi
 if echo "$SETUP_OUTPUT" | grep -q "requires --agent-teams"; then
     pass "validation message mentions --agent-teams requirement"
@@ -76,14 +95,14 @@ create_gitignored_plan_repo "$TEST_DIR/project"
 cd "$TEST_DIR/project"
 set +e
 SETUP_OUTPUT=$(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 CLAUDE_PROJECT_DIR="$TEST_DIR/project" \
-    bash "$SETUP_SCRIPT" --agent-teams --worktree-root .humanize/custom-root temp/plan.md 2>&1)
+    bash "$SETUP_SCRIPT" --agent-teams --no-worktree-teams --worktree-root .humanize/custom-root temp/plan.md 2>&1)
 SETUP_EXIT=$?
 set -e
 
 if [[ "$SETUP_EXIT" -ne 0 ]]; then
-    pass "--worktree-root fails without --worktree-teams"
+    pass "--worktree-root fails when --no-worktree-teams is set"
 else
-    fail "--worktree-root fails without --worktree-teams" "non-zero exit" "exit 0"
+    fail "--worktree-root fails when --no-worktree-teams is set" "non-zero exit" "exit 0"
 fi
 if echo "$SETUP_OUTPUT" | grep -q "requires --worktree-teams"; then
     pass "validation message mentions --worktree-teams requirement"
@@ -359,7 +378,7 @@ else
 fi
 
 # ========================================
-# Test: stop hook adds worktree continuation in implementation phase
+# Test: stop hook keeps worktree prompts compact in implementation phase
 # ========================================
 
 setup_test_dir
@@ -476,15 +495,20 @@ set -e
 
 NEXT_PROMPT="$LOOP_DIR/round-4-prompt.md"
 if [[ -f "$NEXT_PROMPT" ]]; then
-    if grep -qi "Worktree Teams Continuation" "$NEXT_PROMPT"; then
-        pass "stop hook adds worktree continuation template in implementation phase"
+    if ! grep -qi "Worktree Teams Continuation" "$NEXT_PROMPT"; then
+        pass "stop hook does not re-inject worktree continuation template in implementation phase"
     else
-        fail "stop hook adds worktree continuation template in implementation phase" "Worktree Teams Continuation text" "not found"
+        fail "stop hook does not re-inject worktree continuation template in implementation phase" "no Worktree Teams Continuation text" "found"
     fi
-    if grep -qi "parallelizable" "$NEXT_PROMPT"; then
-        pass "continuation prompt enforces explicit parallelizable labels"
+    if ! grep -q "Current worktree root from state" "$NEXT_PROMPT"; then
+        pass "stop hook does not echo worktree_root state in implementation phase prompt"
     else
-        fail "continuation prompt enforces explicit parallelizable labels" "parallelizable text" "not found"
+        fail "stop hook does not echo worktree_root state in implementation phase prompt" "no worktree_root state echo" "found"
+    fi
+    if grep -qi "Below is Codex's review result" "$NEXT_PROMPT"; then
+        pass "implementation-phase prompt still includes review feedback section"
+    else
+        fail "implementation-phase prompt still includes review feedback section" "review feedback section marker" "not found"
     fi
 else
     fail "round-4 prompt exists after stop hook in worktree mode" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"

@@ -139,28 +139,6 @@ BITLESSON_FILE="$PROJECT_ROOT/$BITLESSON_FILE_REL"
 if [[ "$BITLESSON_REQUIRED" != "true" && -f "$BITLESSON_FILE" ]]; then
     BITLESSON_REQUIRED="true"
 fi
-WORKTREE_ROOT_SAFE="$WORKTREE_ROOT"
-if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
-    while [[ "$WORKTREE_ROOT_SAFE" == ./* ]]; do
-        WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE#./}"
-    done
-    while [[ "$WORKTREE_ROOT_SAFE" == *"//"* ]]; do
-        WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE//\/\//\/}"
-    done
-    WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE%/}"
-fi
-if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
-    if [[ ! "$WORKTREE_ROOT_SAFE" =~ ^[a-zA-Z0-9._/-]+$ ]] || \
-       [[ "$WORKTREE_ROOT_SAFE" = /* ]] || \
-       [[ "$WORKTREE_ROOT_SAFE" =~ (^|/)\.\.(/|$) ]] || \
-       [[ "$WORKTREE_ROOT_SAFE" == "." ]] || \
-       [[ "$WORKTREE_ROOT_SAFE" == ".git" ]] || \
-       [[ "$WORKTREE_ROOT_SAFE" == .git/* ]]; then
-        # Ignore malformed/unsafe state values rather than injecting untrusted content into prompts
-        WORKTREE_ROOT_SAFE=""
-    fi
-fi
-
 # Re-validate Codex Model and Effort for YAML safety (in case state.md was manually edited)
 # Use same validation patterns as setup-rlcr-loop.sh
 if [[ ! "$CODEX_MODEL" =~ ^[a-zA-Z0-9._-]+$ ]]; then
@@ -1945,49 +1923,9 @@ if [[ -z "$GOAL_UPDATE_REQUEST" ]]; then
 fi
 echo "$GOAL_UPDATE_REQUEST" >> "$NEXT_PROMPT_FILE"
 
-# Add agent-teams continuation instructions (only during implementation phase, not review phase)
-# Loads both continuation header and shared core template for full team leader guidance
-if [[ "$AGENT_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]]; then
-    AGENT_TEAMS_CONTINUE=$(load_template "$TEMPLATE_DIR" "claude/agent-teams-continue.md" 2>/dev/null)
-    AGENT_TEAMS_CORE=$(load_template "$TEMPLATE_DIR" "claude/agent-teams-core.md" 2>/dev/null)
-    if [[ -n "$AGENT_TEAMS_CONTINUE" ]] && [[ -n "$AGENT_TEAMS_CORE" ]]; then
-        echo "" >> "$NEXT_PROMPT_FILE"
-        echo "$AGENT_TEAMS_CONTINUE" >> "$NEXT_PROMPT_FILE"
-        echo "" >> "$NEXT_PROMPT_FILE"
-        echo "$AGENT_TEAMS_CORE" >> "$NEXT_PROMPT_FILE"
-    else
-        # Fallback if templates are missing
-        cat >> "$NEXT_PROMPT_FILE" << 'AGENT_TEAMS_FALLBACK_EOF'
-
-## Agent Teams Continuation
-
-Continue using **Agent Teams mode** as the **Team Leader**.
-Split remaining work among team members and coordinate their efforts.
-Do NOT do implementation work yourself - delegate all coding to team members.
-AGENT_TEAMS_FALLBACK_EOF
-    fi
-fi
-
-# Add worktree orchestration continuation guidance when enabled
-if [[ "$WORKTREE_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]]; then
-    WORKTREE_TEAMS_CONTINUE=$(load_template "$TEMPLATE_DIR" "claude/worktree-teams-continue.md" 2>/dev/null)
-    if [[ -n "$WORKTREE_TEAMS_CONTINUE" ]]; then
-        echo "" >> "$NEXT_PROMPT_FILE"
-        echo "$WORKTREE_TEAMS_CONTINUE" >> "$NEXT_PROMPT_FILE"
-        if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
-            echo "" >> "$NEXT_PROMPT_FILE"
-            echo "Current worktree root from state: \`$WORKTREE_ROOT_SAFE\`" >> "$NEXT_PROMPT_FILE"
-        fi
-    else
-        cat >> "$NEXT_PROMPT_FILE" << 'WORKTREE_TEAMS_FALLBACK_EOF'
-
-## Worktree Teams Continuation
-
-Continue using scheduler/worker/reviewer worktree orchestration.
-Each task must be explicitly marked parallelizable (`yes` or `no`) before assignment.
-WORKTREE_TEAMS_FALLBACK_EOF
-    fi
-fi
+# Keep next-round prompts compact in teams modes.
+# Scheduler/worker/reviewer coordination should be driven by plan/goal-tracker/worktree-assignment docs,
+# not by re-injecting large continuation templates every round.
 
 append_task_tag_routing_note "$NEXT_PROMPT_FILE"
 

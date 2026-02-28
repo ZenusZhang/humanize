@@ -121,7 +121,7 @@ else
 fi
 
 # ========================================
-# Test: agent_teams: false by default (without --agent-teams)
+# Test: agent_teams defaults to true when env var is enabled
 # ========================================
 
 setup_test_dir
@@ -143,13 +143,45 @@ git add .gitignore
 git commit -q -m "Add gitignore"
 
 cd "$TEST_DIR/project"
-CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$SETUP_SCRIPT" temp/plan.md > /dev/null 2>&1 || true
+CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$SETUP_SCRIPT" temp/plan.md > /dev/null 2>&1 || true
+
+STATE_FILE=$(find "$TEST_DIR/project/.humanize/rlcr" -name "state.md" -type f 2>/dev/null | head -1)
+if [[ -n "$STATE_FILE" ]] && grep -q "^agent_teams: true" "$STATE_FILE"; then
+    pass "agent_teams defaults to true when env var is enabled"
+else
+    fail "agent_teams defaults to true when env var is enabled" "agent_teams: true" "$(grep 'agent_teams' "$STATE_FILE" 2>/dev/null || echo 'not found')"
+fi
+
+# ========================================
+# Test: --no-agent-teams disables team mode
+# ========================================
+
+setup_test_dir
+init_test_git_repo "$TEST_DIR/project"
+
+mkdir -p "$TEST_DIR/project/temp"
+cat > "$TEST_DIR/project/temp/plan.md" << 'EOF'
+# Test Plan
+
+This is a test plan with enough content.
+Line 3 with meaningful content.
+Line 4 with more content.
+Line 5 final content line.
+EOF
+
+echo "temp/" > "$TEST_DIR/project/.gitignore"
+cd "$TEST_DIR/project"
+git add .gitignore
+git commit -q -m "Add gitignore"
+
+cd "$TEST_DIR/project"
+CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$SETUP_SCRIPT" --no-agent-teams temp/plan.md > /dev/null 2>&1 || true
 
 STATE_FILE=$(find "$TEST_DIR/project/.humanize/rlcr" -name "state.md" -type f 2>/dev/null | head -1)
 if [[ -n "$STATE_FILE" ]] && grep -q "^agent_teams: false" "$STATE_FILE"; then
-    pass "agent_teams: false by default without --agent-teams flag"
+    pass "--no-agent-teams disables team mode"
 else
-    fail "agent_teams: false by default without --agent-teams flag" "agent_teams: false" "$(grep 'agent_teams' "$STATE_FILE" 2>/dev/null || echo 'not found')"
+    fail "--no-agent-teams disables team mode" "agent_teams: false" "$(grep 'agent_teams' "$STATE_FILE" 2>/dev/null || echo 'not found')"
 fi
 
 # ========================================
@@ -258,7 +290,7 @@ else
 fi
 
 # ========================================
-# Test: Initial prompt WITHOUT --agent-teams has no team instructions
+# Test: Initial prompt with --no-agent-teams has no team instructions
 # ========================================
 
 setup_test_dir
@@ -280,18 +312,18 @@ git add .gitignore
 git commit -q -m "Add gitignore"
 
 cd "$TEST_DIR/project"
-CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$SETUP_SCRIPT" temp/plan.md > /dev/null 2>&1 || true
+CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$SETUP_SCRIPT" --no-agent-teams temp/plan.md > /dev/null 2>&1 || true
 
 PROMPT_FILE=$(find "$TEST_DIR/project/.humanize/rlcr" -name "round-0-prompt.md" -type f 2>/dev/null | head -1)
 
 if [[ -n "$PROMPT_FILE" ]]; then
     if ! grep -qi "team leader" "$PROMPT_FILE"; then
-        pass "initial prompt without --agent-teams has no team leader instructions"
+        pass "initial prompt with --no-agent-teams has no team leader instructions"
     else
-        fail "initial prompt without --agent-teams has no team leader instructions" "no team leader text" "found team leader text"
+        fail "initial prompt with --no-agent-teams has no team leader instructions" "no team leader text" "found team leader text"
     fi
 else
-    skip "initial prompt without --agent-teams has no team leader instructions" "prompt file not found"
+    skip "initial prompt with --no-agent-teams has no team leader instructions" "prompt file not found"
 fi
 
 # ========================================
@@ -381,14 +413,13 @@ else
 fi
 
 # ========================================
-# Stop Hook Tests: Agent-Teams Continuation in Next-Round Prompt
+# Stop Hook Tests: Agent-Teams Prompt Size in Next-Round Prompt
 # ========================================
 # These tests exercise the actual stop hook (loop-codex-stop-hook.sh) to verify
-# that agent-teams continuation instructions appear in implementation phase
-# prompts but NOT in review phase prompts.
+# that agent-teams continuation templates are NOT re-injected in follow-up rounds.
 
 echo ""
-echo "--- Stop Hook Agent-Teams Continuation Tests ---"
+echo "--- Stop Hook Agent-Teams Prompt Size Tests ---"
 echo ""
 
 PROJECT_ROOT="$SCRIPT_DIR/.."
@@ -530,7 +561,7 @@ MOCK_EOF
 }
 
 # ========================================
-# Test: Implementation phase with agent_teams=true includes continuation
+# Test: Implementation phase with agent_teams=true keeps next-round prompt compact
 # ========================================
 
 setup_stophook_test 3 "true" "false"
@@ -552,18 +583,23 @@ set -e
 # The hook should block exit and generate a next-round prompt
 NEXT_PROMPT="$LOOP_DIR/round-4-prompt.md"
 if [[ -f "$NEXT_PROMPT" ]]; then
-    if grep -qi "Agent Teams" "$NEXT_PROMPT"; then
-        pass "impl phase with agent_teams=true: next-round prompt contains agent-teams continuation"
+    if ! grep -qi "Agent Teams Continuation" "$NEXT_PROMPT"; then
+        pass "impl phase with agent_teams=true: no agent-teams continuation template in next-round prompt"
     else
-        fail "impl phase with agent_teams=true: next-round prompt contains agent-teams continuation" "agent-teams text in prompt" "not found"
+        fail "impl phase with agent_teams=true: no agent-teams continuation template in next-round prompt" "no continuation template text" "found continuation template text"
     fi
-    if grep -qi "team leader" "$NEXT_PROMPT"; then
-        pass "impl phase continuation includes team leader role reminder"
+    if ! grep -qi "team leader" "$NEXT_PROMPT"; then
+        pass "impl phase with agent_teams=true: no team-leader continuation reminder"
     else
-        fail "impl phase continuation includes team leader role reminder" "team leader text" "not found"
+        fail "impl phase with agent_teams=true: no team-leader continuation reminder" "no team leader reminder" "found team leader reminder"
+    fi
+    if grep -qi "Below is Codex's review result" "$NEXT_PROMPT"; then
+        pass "impl phase with agent_teams=true: next-round prompt still contains review feedback section"
+    else
+        fail "impl phase with agent_teams=true: next-round prompt still contains review feedback section" "review feedback section marker" "not found"
     fi
 else
-    fail "impl phase with agent_teams=true: next-round prompt contains agent-teams continuation" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
+    fail "impl phase with agent_teams=true: no agent-teams continuation template in next-round prompt" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
 fi
 
 # ========================================
