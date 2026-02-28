@@ -1924,7 +1924,7 @@ fi
 echo "$GOAL_UPDATE_REQUEST" >> "$NEXT_PROMPT_FILE"
 
 # Keep next-round prompts compact in teams modes.
-# Scheduler/worker/reviewer coordination should be driven by plan/goal-tracker/worktree-assignment docs,
+# Worktree coordination should be driven by plan/goal-tracker/worktree-assignment docs,
 # not by re-injecting large continuation templates every round.
 
 append_task_tag_routing_note "$NEXT_PROMPT_FILE"

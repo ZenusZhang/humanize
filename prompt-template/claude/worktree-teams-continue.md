@@ -1,10 +1,10 @@
 ## Worktree Teams Continuation
 
-Keep using scheduler/worker/reviewer worktree orchestration in this round.
+Keep using document-centered worktree orchestration in this round.
 
 ### Continuation Checklist
 
-1. Rebuild the **Parallelization Matrix** for remaining tasks and keep explicit `yes`/`no` labels.
+1. Update the doc-based **Parallelization Matrix** for remaining tasks and keep explicit `yes`/`no` labels in `plan.md` or `worktree-assignment.md`.
 2. Reuse existing worktree lanes from `worktree-assignment.md` when possible.
 3. If additional lanes are needed, create them with:
    - `"${CLAUDE_PLUGIN_ROOT}/scripts/setup-worktree-teams.sh" --workers <N> --reviewers <M>`

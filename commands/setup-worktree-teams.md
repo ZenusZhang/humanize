@@ -1,5 +1,5 @@
 ---
-description: "Provision scheduler/worker/reviewer git worktree lanes for an active RLCR loop"
+description: "Provision worker/reviewer git worktree lanes for document-centered worktree orchestration"
 argument-hint: "[--workers N] [--reviewers N] [--loop-dir PATH] [--worktree-root PATH] [--branch-prefix PREFIX] [--base-ref REF]"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-worktree-teams.sh:*)"]
 hide-from-slash-command-tool: "true"

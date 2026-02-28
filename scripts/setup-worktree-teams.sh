@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Setup script for scheduler/worker/reviewer git worktree lanes in RLCR loops.
+# Setup script for document-centered worktree lanes (worker/reviewer) in RLCR loops.
 #
 # Usage:
 #   setup-worktree-teams.sh [--workers N] [--reviewers N] [--loop-dir PATH]
@@ -28,7 +28,7 @@ BASE_REF=""
 
 show_help() {
     cat << 'HELP_EOF'
-setup-worktree-teams - Provision worker/reviewer git worktree lanes for an active RLCR loop
+setup-worktree-teams - Provision worker/reviewer git worktree lanes for document-centered orchestration in an active RLCR loop
 
 USAGE:
   setup-worktree-teams.sh [OPTIONS]

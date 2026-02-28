@@ -89,10 +89,10 @@ The `--base-branch` option specifies the base branch for code review comparison.
 Agent Teams + worktree orchestration are enabled by default when `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
 Use `--no-agent-teams` or `--no-worktree-teams` to opt out per loop.
 
-In this mode:
-- Scheduler (team leader) must label every task as parallelizable (`yes/no`)
-- Parallelizable tasks should be assigned to isolated `git worktree` lanes
-- Workers implement in their own worktrees, reviewers validate per-worktree output
+In this mode, coordination is document-centered via `plan.md`, `goal-tracker.md`, and `worktree-assignment.md`:
+- Mark every task as parallelizable (`yes/no`) in planning docs
+- Assign parallelizable tasks to isolated `git worktree` lanes and record lane ownership
+- Keep worker/reviewer execution aligned through docs to avoid overwrite conflicts
 - Use `/humanize:setup-worktree-teams` to provision lane directories and assignment mapping
 
 Optional `--worktree-root <path>` controls where worktrees are created. Default is `.humanize/worktrees/<loop-timestamp>`.

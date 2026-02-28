@@ -1,6 +1,6 @@
 ---
 name: worktree-teams
-description: Provision scheduler/worker/reviewer git worktree lanes for RLCR agent-teams rounds.
+description: Provision worker/reviewer git worktree lanes for document-centered RLCR agent-teams rounds.
 argument-hint: "[--workers N] [--reviewers N] [--loop-dir PATH] [--worktree-root PATH] [--branch-prefix PREFIX] [--base-ref REF]"
 allowed-tools: "Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-worktree-teams.sh:*)"
 ---
@@ -21,7 +21,7 @@ Run:
 
 1. Start RLCR loop with `--agent-teams --worktree-teams`
 2. Run this skill to create worker/reviewer lanes
-3. Use `worktree-assignment.md` in the active loop directory for scheduler assignments
+3. Use `worktree-assignment.md` in the active loop directory as the document-centered source of lane ownership
 
 ## Notes
 

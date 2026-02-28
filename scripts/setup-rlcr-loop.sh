@@ -91,7 +91,7 @@ OPTIONS:
   --agent-teams        Enable Claude Code Agent Teams mode for parallel development.
                        Enabled by default when supported.
   --no-agent-teams     Disable Agent Teams mode for this loop.
-  --worktree-teams     Enable scheduler/worker/reviewer orchestration with git worktree.
+  --worktree-teams     Enable document-centered worktree orchestration via git worktree.
                        Enabled by default when Agent Teams is enabled.
   --no-worktree-teams  Disable worktree orchestration for this loop.
   --agent-teams requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1.
@@ -1270,10 +1270,12 @@ if [[ "$WORKTREE_TEAMS" == "true" ]]; then
     else
         cat >> "$LOOP_DIR/round-0-prompt.md" << 'WORKTREE_TEAMS_EOF'
 
-## Scheduler + Worktree Mode
+## Document-Centered Worktree Mode
 
-You are the scheduler. Explicitly mark every task as parallelizable (`yes` or `no`), then assign
-parallelizable tasks to isolated `git worktree` lanes for worker/reviewer pairs.
+Coordination must be driven by project docs (`plan.md`, `goal-tracker.md`, `worktree-assignment.md`).
+Explicitly mark every task as parallelizable (`yes` or `no`) in the planning docs, then assign
+parallelizable tasks to isolated `git worktree` lanes for worker/reviewer pairs and record lane
+ownership in `worktree-assignment.md`.
 Use `scripts/setup-worktree-teams.sh` to provision worktrees and record assignments before coding.
 Each worker/reviewer Task prompt must explicitly state Claude/Codex cross-review context.
 WORKTREE_TEAMS_EOF
