@@ -749,7 +749,12 @@ Required minimal format:
         in_delta && /^##[[:space:]]+/ { in_delta=0 }
         in_delta { print }
     ' "$SUMMARY_FILE")
-    if ! echo "$BITLESSON_DELTA_BLOCK" | grep -Eiq '\b(none|add|update)\b'; then
+
+    BITLESSON_ACTION_CANDIDATES=$(echo "$BITLESSON_DELTA_BLOCK" | sed -nE 's/^[[:space:]-]*Action:[[:space:]]*([A-Za-z]+).*/\1/p' | tr '[:upper:]' '[:lower:]')
+    BITLESSON_ACTION_COUNT=$(echo "$BITLESSON_ACTION_CANDIDATES" | awk 'NF{c++} END{print c+0}')
+    BITLESSON_ACTION=$(echo "$BITLESSON_ACTION_CANDIDATES" | awk 'NF{print; exit}')
+
+    if [[ "$BITLESSON_ACTION_COUNT" -ne 1 ]] || [[ "$BITLESSON_ACTION" != "none" && "$BITLESSON_ACTION" != "add" && "$BITLESSON_ACTION" != "update" ]]; then
         FALLBACK="# Invalid BitLesson Delta Action
 
 Your \`## BitLesson Delta\` section exists, but it must include one action:
@@ -766,6 +771,193 @@ Your \`## BitLesson Delta\` section exists, but it must include one action:
                 "systemMessage": $msg
             }'
         exit 0
+    fi
+
+    BITLESSON_IDS_RAW=$(echo "$BITLESSON_DELTA_BLOCK" | sed -nE 's/^[[:space:]-]*Lesson ID\(s\):[[:space:]]*(.*)$/\1/p' | head -n1)
+    if [[ -z "$BITLESSON_IDS_RAW" ]]; then
+        BITLESSON_IDS_RAW=$(echo "$BITLESSON_DELTA_BLOCK" | sed -nE 's/^[[:space:]-]*Lesson IDs:[[:space:]]*(.*)$/\1/p' | head -n1)
+    fi
+    BITLESSON_IDS_RAW=$(echo "$BITLESSON_IDS_RAW" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    BITLESSON_IDS_UPPER=$(echo "$BITLESSON_IDS_RAW" | tr '[:lower:]' '[:upper:]')
+
+    CONCRETE_BITLESSON_COUNT=0
+    if [[ -f "$BITLESSON_FILE" ]]; then
+        CONCRETE_BITLESSON_COUNT=$(awk '
+            /^Lesson ID:[[:space:]]*/ {
+                id=$0
+                sub(/^Lesson ID:[[:space:]]*/, "", id)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
+                if (id != "" && id != "<BL-YYYYMMDD-short-name>" && id != "BL-YYYYMMDD-short-name" && id !~ /^<.*>$/) {
+                    count++
+                }
+            }
+            END { print count+0 }
+        ' "$BITLESSON_FILE" 2>/dev/null)
+    fi
+
+    if [[ "$BITLESSON_ACTION" == "none" ]]; then
+        if [[ -n "$BITLESSON_IDS_RAW" ]] && [[ "$BITLESSON_IDS_UPPER" != "NONE" ]]; then
+            FALLBACK="# BitLesson Delta Inconsistent
+
+\`Action: none\` requires \`Lesson ID(s): NONE\` (or leaving Lesson ID(s) empty)."
+            REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/bitlesson-delta-inconsistent.md" "$FALLBACK")
+            jq -n \
+                --arg reason "$REASON" \
+                --arg msg "Loop: BitLesson Delta inconsistent for action none (round $CURRENT_ROUND)" \
+                '{
+                    "decision": "block",
+                    "reason": $reason,
+                    "systemMessage": $msg
+                }'
+            exit 0
+        fi
+
+        if [[ "$CURRENT_ROUND" -gt 0 ]] && [[ "$CONCRETE_BITLESSON_COUNT" -eq 0 ]]; then
+            FALLBACK="# BitLesson Recording Required
+
+\`Action: none\` is not allowed in round {{CURRENT_ROUND}} when {{BITLESSON_FILE}} still has no concrete lesson entries.
+
+If this round resolves issues discovered in previous rounds, add or update at least one reusable lesson and report \`Action: add\` or \`Action: update\`."
+            REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/bitlesson-delta-empty-kb.md" "$FALLBACK" \
+                "CURRENT_ROUND=$CURRENT_ROUND" \
+                "BITLESSON_FILE=$BITLESSON_FILE_REL")
+            jq -n \
+                --arg reason "$REASON" \
+                --arg msg "Loop: BitLesson entry required for non-zero round (round $CURRENT_ROUND)" \
+                '{
+                    "decision": "block",
+                    "reason": $reason,
+                    "systemMessage": $msg
+                }'
+            exit 0
+        fi
+    else
+        if [[ -z "$BITLESSON_IDS_RAW" ]] || [[ "$BITLESSON_IDS_UPPER" == "NONE" ]]; then
+            FALLBACK="# BitLesson Delta Inconsistent
+
+\`Action: {{ACTION}}\` requires concrete \`Lesson ID(s)\` (not \`NONE\`)."
+            REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/bitlesson-delta-inconsistent.md" "$FALLBACK" \
+                "ACTION=$BITLESSON_ACTION")
+            jq -n \
+                --arg reason "$REASON" \
+                --arg msg "Loop: BitLesson Delta missing lesson IDs for action $BITLESSON_ACTION (round $CURRENT_ROUND)" \
+                '{
+                    "decision": "block",
+                    "reason": $reason,
+                    "systemMessage": $msg
+                }'
+            exit 0
+        fi
+
+        if [[ ! -f "$BITLESSON_FILE" ]]; then
+            FALLBACK="# BitLesson File Missing
+
+Summary declares \`Action: {{ACTION}}\`, but {{BITLESSON_FILE}} does not exist."
+            REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/bitlesson-delta-inconsistent.md" "$FALLBACK" \
+                "ACTION=$BITLESSON_ACTION" \
+                "BITLESSON_FILE=$BITLESSON_FILE_REL")
+            jq -n \
+                --arg reason "$REASON" \
+                --arg msg "Loop: BitLesson file missing for action $BITLESSON_ACTION (round $CURRENT_ROUND)" \
+                '{
+                    "decision": "block",
+                    "reason": $reason,
+                    "systemMessage": $msg
+                }'
+            exit 0
+        fi
+
+        INVALID_IDS=""
+        MISSING_IDS=""
+        HAS_ANY_ID=false
+        OLD_IFS="$IFS"
+        IFS=','
+        read -r -a LESSON_ID_ARRAY <<< "$BITLESSON_IDS_RAW"
+        IFS="$OLD_IFS"
+
+        for RAW_ID in "${LESSON_ID_ARRAY[@]}"; do
+            LESSON_ID=$(echo "$RAW_ID" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            [[ -n "$LESSON_ID" ]] || continue
+            HAS_ANY_ID=true
+
+            if [[ ! "$LESSON_ID" =~ ^BL-[0-9]{8}-[A-Za-z0-9._-]+$ ]]; then
+                INVALID_IDS="${INVALID_IDS}
+- $LESSON_ID"
+                continue
+            fi
+
+            if ! awk -v target="$LESSON_ID" '
+                /^Lesson ID:[[:space:]]*/ {
+                    id=$0
+                    sub(/^Lesson ID:[[:space:]]*/, "", id)
+                    gsub(/^[[:space:]]+|[[:space:]]+$/, "", id)
+                    if (id == target) found=1
+                }
+                END { exit(found ? 0 : 1) }
+            ' "$BITLESSON_FILE" >/dev/null 2>&1; then
+                MISSING_IDS="${MISSING_IDS}
+- $LESSON_ID"
+            fi
+        done
+
+        if [[ "$HAS_ANY_ID" != "true" ]]; then
+            FALLBACK="# BitLesson Delta Inconsistent
+
+\`Action: {{ACTION}}\` requires at least one concrete Lesson ID."
+            REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/bitlesson-delta-inconsistent.md" "$FALLBACK" \
+                "ACTION=$BITLESSON_ACTION")
+            jq -n \
+                --arg reason "$REASON" \
+                --arg msg "Loop: BitLesson Delta has no concrete lesson IDs (round $CURRENT_ROUND)" \
+                '{
+                    "decision": "block",
+                    "reason": $reason,
+                    "systemMessage": $msg
+                }'
+            exit 0
+        fi
+
+        if [[ -n "$INVALID_IDS" ]]; then
+            FALLBACK="# Invalid BitLesson Lesson ID(s)
+
+The following IDs in \`## BitLesson Delta\` are invalid:
+{{INVALID_IDS}}
+
+Expected format: \`BL-YYYYMMDD-short-name\`."
+            REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/bitlesson-delta-inconsistent.md" "$FALLBACK" \
+                "INVALID_IDS=$INVALID_IDS")
+            jq -n \
+                --arg reason "$REASON" \
+                --arg msg "Loop: Invalid Lesson ID format in BitLesson Delta (round $CURRENT_ROUND)" \
+                '{
+                    "decision": "block",
+                    "reason": $reason,
+                    "systemMessage": $msg
+                }'
+            exit 0
+        fi
+
+        if [[ -n "$MISSING_IDS" ]]; then
+            FALLBACK="# BitLesson Entry Missing
+
+Summary declares \`Action: {{ACTION}}\`, but these Lesson ID(s) are not found in {{BITLESSON_FILE}}:
+{{MISSING_IDS}}
+
+Add/update those entries in {{BITLESSON_FILE}} before exiting."
+            REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/bitlesson-delta-inconsistent.md" "$FALLBACK" \
+                "ACTION=$BITLESSON_ACTION" \
+                "BITLESSON_FILE=$BITLESSON_FILE_REL" \
+                "MISSING_IDS=$MISSING_IDS")
+            jq -n \
+                --arg reason "$REASON" \
+                --arg msg "Loop: BitLesson IDs missing in knowledge base (round $CURRENT_ROUND)" \
+                '{
+                    "decision": "block",
+                    "reason": $reason,
+                    "systemMessage": $msg
+                }'
+            exit 0
+        fi
     fi
 fi
 

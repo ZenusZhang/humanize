@@ -7,7 +7,7 @@
 # - bitlesson-selector agent exists with valid frontmatter and stable output format
 # - setup-rlcr-loop initializes project bitlesson.md and injects round-0 requirements
 # - next-round prompt preserves BitLesson selector requirements
-# - stop hook blocks summaries missing BitLesson Delta
+# - stop hook enforces BitLesson Delta semantics (action/id/content consistency)
 #
 
 set -euo pipefail
@@ -185,6 +185,22 @@ done
 # Test 4: Next-round prompt keeps BitLesson requirements
 # ========================================
 
+# Add one concrete lesson entry so Action:none in later round remains valid.
+cat >> "$TEST_DIR/project/bitlesson.md" << 'EOF'
+
+## Lesson: pre-existing-known-fix
+Lesson ID: BL-20260101-existing-fix
+Scope: tests
+Problem Description: Prior multi-round issue already captured.
+Root Cause: Historical regression.
+Solution: Reused known remediation pattern.
+Constraints: Test fixture only.
+Validation Evidence: prior loop records.
+Source Rounds: 0-1
+EOF
+git -C "$TEST_DIR/project" add bitlesson.md
+git -C "$TEST_DIR/project" commit -q -m "Add concrete bitlesson entry for stop-hook tests"
+
 # Move loop to round 1 so stop hook skips round-0 goal tracker initialization check
 sed -i 's/^current_round: 0$/current_round: 1/' "$STATE_FILE"
 cat > "$LOOP_DIR/round-1-summary.md" << 'EOF'
@@ -217,7 +233,29 @@ else
 fi
 
 # ========================================
-# Test 5: Stop hook blocks when BitLesson Delta is missing
+# Test 5: Stop hook blocks Action:add when lesson IDs are not in bitlesson.md
+# ========================================
+
+cat > "$LOOP_DIR/round-2-summary.md" << 'EOF'
+# Round 2 Summary
+
+Added a new lesson.
+
+## BitLesson Delta
+- Action: add
+- Lesson ID(s): BL-20260201-missing-entry
+- Notes: Added new lesson entry.
+EOF
+
+ADD_BLOCK_RESULT=$(echo "$HOOK_INPUT" | CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$STOP_HOOK")
+if echo "$ADD_BLOCK_RESULT" | grep -q '"decision": "block"' && echo "$ADD_BLOCK_RESULT" | grep -q "Lesson ID"; then
+    pass "stop hook blocks Action:add when lesson ID is absent from bitlesson.md"
+else
+    fail "stop hook blocks Action:add when lesson ID is absent from bitlesson.md" "block decision mentioning Lesson ID" "$ADD_BLOCK_RESULT"
+fi
+
+# ========================================
+# Test 6: Stop hook blocks when BitLesson Delta is missing
 # ========================================
 
 cat > "$LOOP_DIR/round-2-summary.md" << 'EOF'
@@ -231,6 +269,32 @@ if echo "$BLOCK_RESULT" | grep -q '"decision": "block"' && echo "$BLOCK_RESULT" 
     pass "stop hook blocks summary when BitLesson Delta section is missing"
 else
     fail "stop hook blocks summary when BitLesson Delta section is missing" "block decision mentioning BitLesson Delta" "$BLOCK_RESULT"
+fi
+
+# ========================================
+# Test 7: Stop hook blocks round>0 Action:none when bitlesson has no concrete entries
+# ========================================
+
+cp "$BITLESSON_TEMPLATE_FILE" "$TEST_DIR/project/bitlesson.md"
+git -C "$TEST_DIR/project" add bitlesson.md
+git -C "$TEST_DIR/project" commit -q -m "Reset bitlesson fixture to template-only"
+
+cat > "$LOOP_DIR/round-2-summary.md" << 'EOF'
+# Round 2 Summary
+
+Did follow-up implementation.
+
+## BitLesson Delta
+- Action: none
+- Lesson ID(s): NONE
+- Notes: No lessons.
+EOF
+
+NONE_BLOCK_RESULT=$(echo "$HOOK_INPUT" | CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$STOP_HOOK")
+if echo "$NONE_BLOCK_RESULT" | grep -q '"decision": "block"' && echo "$NONE_BLOCK_RESULT" | grep -q "BitLesson"; then
+    pass "stop hook blocks round>0 Action:none when bitlesson.md has no concrete entries"
+else
+    fail "stop hook blocks round>0 Action:none when bitlesson.md has no concrete entries" "block decision mentioning BitLesson recording requirement" "$NONE_BLOCK_RESULT"
 fi
 
 print_test_summary "BitLesson Workflow Tests"
