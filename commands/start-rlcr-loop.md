@@ -1,6 +1,6 @@
 ---
 description: "Start iterative loop with Codex review"
-argument-hint: "[path/to/plan.md | --plan-file path/to/plan.md] [--max N] [--codex-model MODEL:EFFORT] [--codex-timeout SECONDS] [--track-plan-file] [--push-every-round] [--base-branch BRANCH] [--full-review-round N] [--skip-impl] [--claude-answer-codex] [--agent-teams] [--worktree-teams] [--worktree-root PATH]"
+argument-hint: "[path/to/plan.md | --plan-file path/to/plan.md] [--max N] [--codex-model MODEL:EFFORT] [--codex-timeout SECONDS] [--track-plan-file] [--push-every-round] [--base-branch BRANCH] [--full-review-round N] [--skip-impl] [--claude-answer-codex] [--agent-teams|--no-agent-teams] [--worktree-teams|--no-worktree-teams] [--worktree-root PATH]"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-rlcr-loop.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
@@ -86,7 +86,10 @@ The `--base-branch` option specifies the base branch for code review comparison.
 
 ## Agent Teams + Worktree Orchestration
 
-Use `--agent-teams --worktree-teams` to enforce explicit scheduler/worker/reviewer orchestration:
+Agent Teams + worktree orchestration are enabled by default when `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
+Use `--no-agent-teams` or `--no-worktree-teams` to opt out per loop.
+
+In this mode:
 - Scheduler (team leader) must label every task as parallelizable (`yes/no`)
 - Parallelizable tasks should be assigned to isolated `git worktree` lanes
 - Workers implement in their own worktrees, reviewers validate per-worktree output

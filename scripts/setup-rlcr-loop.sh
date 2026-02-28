@@ -47,8 +47,11 @@ FULL_REVIEW_ROUND="$DEFAULT_FULL_REVIEW_ROUND"
 SKIP_IMPL="false"
 SKIP_IMPL_NO_PLAN="false"
 ASK_CODEX_QUESTION="true"
-AGENT_TEAMS="false"
-WORKTREE_TEAMS="false"
+# Default to team orchestration on; users can opt out with --no-agent-teams/--no-worktree-teams.
+AGENT_TEAMS="true"
+WORKTREE_TEAMS="true"
+AGENT_TEAMS_EXPLICIT="false"
+WORKTREE_TEAMS_EXPLICIT="false"
 WORKTREE_ROOT=""
 
 show_help() {
@@ -86,10 +89,13 @@ OPTIONS:
                        your plan that deserve human clarification. By default,
                        Claude asks user for clarification, which is preferred.
   --agent-teams        Enable Claude Code Agent Teams mode for parallel development.
-                       Requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 environment variable.
-                       Claude acts as team leader, splitting tasks among team members.
+                       Enabled by default when supported.
+  --no-agent-teams     Disable Agent Teams mode for this loop.
   --worktree-teams     Enable scheduler/worker/reviewer orchestration with git worktree.
-                       Requires --agent-teams and path canonicalization support
+                       Enabled by default when Agent Teams is enabled.
+  --no-worktree-teams  Disable worktree orchestration for this loop.
+  --agent-teams requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1.
+  --worktree-teams also requires path canonicalization support
                        (python3 preferred, or GNU readlink with -f/-m).
   --worktree-root <PATH>
                        Root directory for generated worktrees (default: .humanize/worktrees/<loop-timestamp>)
@@ -120,7 +126,9 @@ EXAMPLES:
   /humanize:start-rlcr-loop docs/impl.md --max 20
   /humanize:start-rlcr-loop plan.md --codex-model gpt-5.3-codex:xhigh
   /humanize:start-rlcr-loop plan.md --codex-timeout 7200  # 2 hour timeout
-  /humanize:start-rlcr-loop plan.md --agent-teams --worktree-teams
+  /humanize:start-rlcr-loop plan.md
+  /humanize:start-rlcr-loop plan.md --no-worktree-teams
+  /humanize:start-rlcr-loop plan.md --no-agent-teams
 
 STOPPING:
   - /humanize:cancel-rlcr-loop   Cancel the active loop
@@ -234,10 +242,22 @@ while [[ $# -gt 0 ]]; do
             ;;
         --agent-teams)
             AGENT_TEAMS="true"
+            AGENT_TEAMS_EXPLICIT="true"
+            shift
+            ;;
+        --no-agent-teams)
+            AGENT_TEAMS="false"
+            AGENT_TEAMS_EXPLICIT="true"
             shift
             ;;
         --worktree-teams)
             WORKTREE_TEAMS="true"
+            WORKTREE_TEAMS_EXPLICIT="true"
+            shift
+            ;;
+        --no-worktree-teams)
+            WORKTREE_TEAMS="false"
+            WORKTREE_TEAMS_EXPLICIT="true"
             shift
             ;;
         --worktree-root)
@@ -305,23 +325,46 @@ fi
 # Agent Teams Validation
 # ========================================
 
+# Skip-impl mode does not run implementation orchestration; disable default team modes
+# unless the user explicitly forced them.
+if [[ "$SKIP_IMPL" == "true" ]]; then
+    if [[ "$WORKTREE_TEAMS" == "true" && "$WORKTREE_TEAMS_EXPLICIT" != "true" ]]; then
+        echo "Warning: --skip-impl disables default worktree teams mode." >&2
+        WORKTREE_TEAMS="false"
+    fi
+    if [[ "$AGENT_TEAMS" == "true" && "$AGENT_TEAMS_EXPLICIT" != "true" ]]; then
+        echo "Warning: --skip-impl disables default agent teams mode." >&2
+        AGENT_TEAMS="false"
+    fi
+fi
+
 if [[ "$AGENT_TEAMS" == "true" ]]; then
     if [[ "${CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:-}" != "1" ]]; then
-        echo "Error: --agent-teams requires the CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS environment variable to be set." >&2
-        echo "" >&2
-        echo "Claude Code Agent Teams is an experimental feature that must be enabled before use." >&2
-        echo "To enable it, set the environment variable before starting Claude Code:" >&2
-        echo "" >&2
-        echo "  export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1" >&2
-        echo "" >&2
-        echo "Or add it to your shell profile (~/.bashrc, ~/.zshrc) for persistent access." >&2
-        exit 1
+        if [[ "$AGENT_TEAMS_EXPLICIT" == "true" ]]; then
+            echo "Error: --agent-teams requires the CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS environment variable to be set." >&2
+            echo "" >&2
+            echo "Claude Code Agent Teams is an experimental feature that must be enabled before use." >&2
+            echo "To enable it, set the environment variable before starting Claude Code:" >&2
+            echo "" >&2
+            echo "  export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1" >&2
+            echo "" >&2
+            echo "Or add it to your shell profile (~/.bashrc, ~/.zshrc) for persistent access." >&2
+            exit 1
+        fi
+        echo "Warning: CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS is not enabled; default agent/worktree teams are disabled for this run." >&2
+        AGENT_TEAMS="false"
+        if [[ "$WORKTREE_TEAMS_EXPLICIT" != "true" ]]; then
+            WORKTREE_TEAMS="false"
+        fi
     fi
 fi
 
 if [[ "$WORKTREE_TEAMS" == "true" && "$AGENT_TEAMS" != "true" ]]; then
-    echo "Error: --worktree-teams requires --agent-teams" >&2
-    exit 1
+    if [[ "$WORKTREE_TEAMS_EXPLICIT" == "true" ]]; then
+        echo "Error: --worktree-teams requires --agent-teams" >&2
+        exit 1
+    fi
+    WORKTREE_TEAMS="false"
 fi
 
 if [[ "$WORKTREE_TEAMS" == "true" && "$SKIP_IMPL" == "true" ]]; then

@@ -28,7 +28,7 @@ This command:
 
 ## Notes
 
-- Run this after `/humanize:start-rlcr-loop --agent-teams --worktree-teams`
+- Run this after `/humanize:start-rlcr-loop` (agent/worktree modes are default-on when supported)
 - `--reviewers` defaults to the same count as `--workers`
 - `--worktree-root` defaults to state value, then `.humanize/worktrees/<loop-id>`
 - `--base-ref` defaults to `start_branch` from loop state, then current branch
