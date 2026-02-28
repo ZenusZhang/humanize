@@ -181,28 +181,34 @@ OPTIONS:
                          Interval for Full Alignment Check rounds (default: 5, min: 2)
   --skip-impl            Skip implementation phase, go directly to code review
                          Plan file is optional when using this flag
-  --agent-teams          Enable Claude Agent Teams mode (requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)
-  --worktree-teams       In Agent Teams mode, require scheduler/worker/reviewer orchestration via git worktree
+  --agent-teams          Enable Claude Agent Teams mode
+  --no-agent-teams       Disable Agent Teams mode for this loop
+  --worktree-teams       Enable document-centered worktree orchestration via git worktree
+  --no-worktree-teams    Disable worktree orchestration for this loop
   --worktree-root <PATH> Root directory for generated worktrees
   -h, --help             Show help message
 ```
 
+Agent/worktree defaults are active when `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is set.
+
 Plan expectation: each task should include a routing tag (`coding` or `analyze`) generated during `/humanize:gen-plan`.
 Each project should maintain `bitlesson.md`; `start-rlcr-loop` auto-initializes it if missing.
 
-#### Parallel Worktree Teams (Scheduler/Worker/Reviewer)
+#### Parallel Worktree Teams (Document-Centered)
 
-For explicit scheduler/worker/reviewer execution with isolated branches:
+Document-centered worktree orchestration is default-on when `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is set:
 
 ```bash
 export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
-/humanize:start-rlcr-loop docs/my-feature-plan.md --agent-teams --worktree-teams
+/humanize:start-rlcr-loop docs/my-feature-plan.md
 ```
 
-In this mode, the scheduler (team leader) must:
-- Mark every task as parallelizable (`yes`/`no`)
-- Assign parallelizable tasks to dedicated `git worktree` lanes
-- Pair worker and reviewer agents per lane to avoid file overwrite conflicts
+In this mode, coordination must be driven by project docs (`plan.md`, `goal-tracker.md`, `worktree-assignment.md`):
+- Mark every task as parallelizable (`yes`/`no`) in planning docs
+- Assign parallelizable tasks to dedicated `git worktree` lanes and record lane ownership
+- Keep worker/reviewer execution aligned through docs to avoid file overwrite conflicts
+
+If needed, opt out per run with `--no-agent-teams` or `--no-worktree-teams`.
 
 Helper command:
 
