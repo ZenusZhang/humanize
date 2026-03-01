@@ -171,7 +171,7 @@ OPTIONS:
   --plan-file <path>     Explicit plan file path (alternative to positional arg)
   --max <N>              Maximum iterations before auto-stop (default: 42)
   --codex-model <MODEL:EFFORT>
-                         Codex model and reasoning effort (default: gpt-5.3-codex:xhigh)
+                         Codex model and reasoning effort (default: gpt-5.2:xhigh)
   --codex-timeout <SECONDS>
                          Timeout for each Codex review in seconds (default: 5400)
   --track-plan-file      Indicate plan file should be tracked in git (must be clean)
@@ -283,7 +283,7 @@ BOT FLAGS (at least one required):
 OPTIONS:
   --max <N>              Maximum iterations before auto-stop (default: 42)
   --codex-model <MODEL:EFFORT>
-                         Codex model and reasoning effort (default: gpt-5.2-codex:medium)
+                         Codex model and reasoning effort (default: gpt-5.2:xhigh)
   --codex-timeout <SECONDS>
                          Timeout for each Codex review in seconds (default: 900)
   -h, --help             Show help message
@@ -296,7 +296,7 @@ OPTIONS:
 
 OPTIONS:
   --codex-model <MODEL:EFFORT>
-                         Codex model and reasoning effort (default: gpt-5.3-codex:xhigh)
+                         Codex model and reasoning effort (default: gpt-5.2:xhigh)
   --codex-timeout <SECONDS>
                          Timeout for the Codex query in seconds (default: 3600)
   -h, --help             Show help message

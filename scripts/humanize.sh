@@ -1289,7 +1289,7 @@ _humanize_monitor_pr() {
         configured_bots=${configured_bots:-"none"}
         active_bots=${active_bots:-"none"}
         codex_model=${codex_model:-"$DEFAULT_CODEX_MODEL"}
-        codex_effort=${codex_effort:-"medium"}
+        codex_effort=${codex_effort:-"$DEFAULT_CODEX_EFFORT"}
         started_at=${started_at:-"N/A"}
 
         echo "$current_round|$max_iterations|$pr_number|$start_branch|$configured_bots|$active_bots|$codex_model|$codex_effort|$started_at"

@@ -25,9 +25,9 @@ set -euo pipefail
 # Default Configuration
 # ========================================
 
-# Override defaults before sourcing loop-common.sh (PR loop uses different model/effort than RLCR)
-DEFAULT_CODEX_MODEL="gpt-5.2-codex"
-DEFAULT_CODEX_EFFORT="medium"
+# Override defaults before sourcing loop-common.sh when PR loop needs custom values
+DEFAULT_CODEX_MODEL="gpt-5.2"
+DEFAULT_CODEX_EFFORT="xhigh"
 DEFAULT_CODEX_TIMEOUT=900
 DEFAULT_POLL_INTERVAL=30
 DEFAULT_POLL_TIMEOUT=900  # 15 minutes per bot

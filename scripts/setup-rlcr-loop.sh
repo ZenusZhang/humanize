@@ -71,7 +71,7 @@ OPTIONS:
   --track-plan-file    Indicate plan file should be tracked in git (must be clean)
   --max <N>            Maximum iterations before auto-stop (default: 42)
   --codex-model <MODEL:EFFORT>
-                       Codex model and reasoning effort (default: gpt-5.3-codex:xhigh)
+                       Codex model and reasoning effort (default: gpt-5.2:xhigh)
   --codex-timeout <SECONDS>
                        Timeout for each Codex review in seconds (default: 5400)
   --push-every-round   Require git push after each round (default: commits stay local)
@@ -131,7 +131,7 @@ DESCRIPTION:
 EXAMPLES:
   /humanize:start-rlcr-loop docs/feature-plan.md
   /humanize:start-rlcr-loop docs/impl.md --max 20
-  /humanize:start-rlcr-loop plan.md --codex-model gpt-5.3-codex:xhigh
+  /humanize:start-rlcr-loop plan.md --codex-model gpt-5.2:xhigh
   /humanize:start-rlcr-loop plan.md --codex-timeout 7200  # 2 hour timeout
   /humanize:start-rlcr-loop plan.md
   /humanize:start-rlcr-loop plan.md --no-worktree-teams

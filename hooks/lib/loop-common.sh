@@ -42,8 +42,8 @@ readonly FIELD_WORKTREE_TEAMS="worktree_teams"
 readonly FIELD_WORKTREE_ROOT="worktree_root"
 
 # Default Codex configuration (single source of truth - all scripts reference this)
-# Both use :- so scripts can override before sourcing (e.g. PR loop sets different model/effort)
-DEFAULT_CODEX_MODEL="${DEFAULT_CODEX_MODEL:-gpt-5.3-codex}"
+# Both use :- so scripts can override before sourcing when needed.
+DEFAULT_CODEX_MODEL="${DEFAULT_CODEX_MODEL:-gpt-5.2}"
 DEFAULT_CODEX_EFFORT="${DEFAULT_CODEX_EFFORT:-xhigh}"
 
 # Codex review markers
