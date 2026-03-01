@@ -245,6 +245,80 @@ if [[ -z "$RAW_FULL_REVIEW_ROUND" ]]; then
 fi
 
 # ========================================
+# Helper Functions
+# ========================================
+
+estimate_hook_input_tokens() {
+    local hook_payload="$1"
+    local payload_bytes=""
+    payload_bytes=$(printf '%s' "$hook_payload" | wc -c | tr -d '[:space:]')
+    if [[ -z "$payload_bytes" ]] || ! [[ "$payload_bytes" =~ ^[0-9]+$ ]]; then
+        payload_bytes=0
+    fi
+    # Coarse tokenizer approximation for safety checks.
+    echo $(( (payload_bytes + 3) / 4 ))
+}
+
+write_context_guard_note() {
+    local estimated_tokens="$1"
+    local token_threshold="$2"
+    local note_file="$LOOP_DIR/context-guard-recovery.md"
+
+    cat > "$note_file" << EOF
+# Context Guard Recovery
+
+- Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+- Estimated Tokens: $estimated_tokens
+- Guard Threshold: $token_threshold
+- Loop Directory: $LOOP_DIR
+- Current Summary: $SUMMARY_FILE
+
+## Recovery Steps
+1. Start a fresh Claude session to reset context usage.
+2. Continue from loop docs: plan.md, goal-tracker.md, worktree-assignment.md, and current summary.
+3. Retry the stop flow after summarizing only net-new changes.
+EOF
+
+    echo "$note_file"
+}
+
+write_loop_summary_template() {
+    local target_file="$1"
+    local phase_label="$2"
+    local include_bitlesson="$3"
+
+    if [[ -f "$target_file" ]]; then
+        return 0
+    fi
+
+    cat > "$target_file" << EOF
+# ${phase_label} Summary
+
+## Work Completed
+- [Describe what was implemented in this phase]
+
+## Files Changed
+- [List created/modified files]
+
+## Validation
+- [List tests/commands run and outcomes]
+
+## Remaining Items
+- [List unresolved items, if any]
+EOF
+
+    if [[ "$include_bitlesson" == "true" ]]; then
+        cat >> "$target_file" << 'EOF'
+
+## BitLesson Delta
+- Action: none|add|update
+- Lesson ID(s): NONE
+- Notes: [what changed and why]
+EOF
+    fi
+}
+
+# ========================================
 # Quick-check 0.5: Branch Consistency
 # ========================================
 
@@ -1047,6 +1121,47 @@ if [[ "$IS_FINALIZE_PHASE" == "true" ]]; then
 fi
 
 # ========================================
+# Context Token Guard (Feature 5)
+# ========================================
+# Guard before expensive codex review paths.
+
+TOKEN_GUARD_THRESHOLD="${HUMANIZE_RLCR_TOKEN_GUARD_TOKENS:-150000}"
+if [[ "$TOKEN_GUARD_THRESHOLD" =~ ^[0-9]+$ ]] && [[ "$TOKEN_GUARD_THRESHOLD" -gt 0 ]]; then
+    HOOK_INPUT_TOKEN_ESTIMATE=$(estimate_hook_input_tokens "$HOOK_INPUT")
+    if [[ "$HOOK_INPUT_TOKEN_ESTIMATE" -gt "$TOKEN_GUARD_THRESHOLD" ]]; then
+        RECOVERY_NOTE_FILE=$(write_context_guard_note "$HOOK_INPUT_TOKEN_ESTIMATE" "$TOKEN_GUARD_THRESHOLD")
+        FALLBACK="# Context Token Guard Triggered
+
+Estimated context size from stop-hook input: {{ESTIMATED_TOKENS}} tokens.
+Safety threshold: {{TOKEN_THRESHOLD}} tokens.
+
+The loop is blocked to avoid low-quality reviews caused by context pressure.
+
+## Next Steps
+1. Start a fresh Claude session.
+2. Resume from loop docs: {{PLAN_FILE}}, {{GOAL_TRACKER_FILE}}, {{SUMMARY_FILE}}.
+3. Recovery note: {{RECOVERY_NOTE_FILE}}"
+        REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/context-token-guard.md" "$FALLBACK" \
+            "ESTIMATED_TOKENS=$HOOK_INPUT_TOKEN_ESTIMATE" \
+            "TOKEN_THRESHOLD=$TOKEN_GUARD_THRESHOLD" \
+            "PLAN_FILE=$PLAN_FILE" \
+            "GOAL_TRACKER_FILE=$GOAL_TRACKER_FILE" \
+            "SUMMARY_FILE=$SUMMARY_FILE" \
+            "RECOVERY_NOTE_FILE=$RECOVERY_NOTE_FILE")
+
+        jq -n \
+            --arg reason "$REASON" \
+            --arg msg "Loop: Blocked - context token guard triggered" \
+            '{
+                "decision": "block",
+                "reason": $reason,
+                "systemMessage": $msg
+            }'
+        exit 0
+    fi
+fi
+
+# ========================================
 # Get Docs Path from Config
 # ========================================
 
@@ -1345,6 +1460,7 @@ enter_finalize_phase() {
     echo "State file renamed to: $LOOP_DIR/finalize-state.md" >&2
 
     local finalize_summary_file="$LOOP_DIR/finalize-summary.md"
+    write_loop_summary_template "$finalize_summary_file" "Finalize" "false"
     local finalize_prompt
 
     if [[ -n "$skip_reason" ]]; then
@@ -1453,6 +1569,7 @@ continue_review_loop_with_issues() {
     # Build review-fix prompt for Claude
     local next_prompt_file="$LOOP_DIR/round-${round}-prompt.md"
     local next_summary_file="$LOOP_DIR/round-${round}-summary.md"
+    write_loop_summary_template "$next_summary_file" "Review Round $round" "true"
 
     local fallback="# Code Review Findings
 
@@ -1836,6 +1953,7 @@ mv "$TEMP_FILE" "$STATE_FILE"
 # Create next round prompt
 NEXT_PROMPT_FILE="$LOOP_DIR/round-${NEXT_ROUND}-prompt.md"
 NEXT_SUMMARY_FILE="$LOOP_DIR/round-${NEXT_ROUND}-summary.md"
+write_loop_summary_template "$NEXT_SUMMARY_FILE" "Round $NEXT_ROUND" "true"
 
 # Build the next round prompt from templates
 NEXT_ROUND_FALLBACK="# Next Round Instructions

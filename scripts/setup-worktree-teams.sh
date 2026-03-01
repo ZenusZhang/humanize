@@ -294,6 +294,114 @@ ensure_lane() {
     printf '| %s | %s | `%s` | `%s` | %s |\n' "$lane_name" "$lane_role" "$active_branch" "$display_path" "$lane_status" >> "$ASSIGNMENT_FILE"
 }
 
+extract_plan_task_rows() {
+    local plan_file="$1"
+    if [[ ! -f "$plan_file" ]]; then
+        return 0
+    fi
+
+    awk -F'|' '
+        function trim(text) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
+            return text
+        }
+        function is_separator_row() {
+            if (cell_count == 0) return 1
+            for (k = 1; k <= cell_count; k++) {
+                if (cells_lc[k] !~ /^:?-+:?$/) return 0
+            }
+            return 1
+        }
+        BEGIN {
+            task_col = 0
+            dep_col = 0
+        }
+        /^\|/ {
+            cell_count = 0
+            for (i = 1; i <= NF; i++) {
+                cell = trim($i)
+                if ((i == 1 || i == NF) && cell == "") {
+                    continue
+                }
+                cell_count++
+                cells_raw[cell_count] = cell
+                cells_lc[cell_count] = tolower(cell)
+            }
+
+            if (cell_count == 0 || is_separator_row()) {
+                next
+            }
+
+            if (task_col == 0) {
+                for (j = 1; j <= cell_count; j++) {
+                    if (cells_lc[j] == "task id" || cells_lc[j] == "taskid" || cells_lc[j] == "task") {
+                        task_col = j
+                    }
+                    if (cells_lc[j] == "blockedby" || cells_lc[j] == "blocked by" || cells_lc[j] == "dependency" || cells_lc[j] == "depends on") {
+                        dep_col = j
+                    }
+                }
+                if (task_col > 0) {
+                    next
+                }
+            }
+
+            if (task_col > 0 && task_col <= cell_count) {
+                task_id = cells_raw[task_col]
+                dep = (dep_col > 0 && dep_col <= cell_count) ? cells_raw[dep_col] : "-"
+            } else {
+                task_id = (cell_count >= 2) ? cells_raw[2] : ""
+                dep = (cell_count >= 6) ? cells_raw[6] : "-"
+            }
+
+            if (tolower(task_id) ~ /^task[0-9a-z._-]+$/) {
+                if (dep == "") dep = "-"
+                print task_id "|" dep
+            }
+        }
+    ' "$plan_file"
+}
+
+append_parallelization_matrix() {
+    local plan_file="$LOOP_DIR/plan.md"
+    local task_rows=""
+    task_rows=$(extract_plan_task_rows "$plan_file")
+
+    echo "" >> "$ASSIGNMENT_FILE"
+    echo "## Parallelization Matrix" >> "$ASSIGNMENT_FILE"
+    echo "" >> "$ASSIGNMENT_FILE"
+    echo "Default values are scaffolded automatically. Update `Parallelizable (yes/no)` and ownership before implementation." >> "$ASSIGNMENT_FILE"
+    echo "" >> "$ASSIGNMENT_FILE"
+    echo "| Task ID | Parallelizable (yes/no) | Reason | File Ownership | blockedBy | Worker | Reviewer | Worktree Path |" >> "$ASSIGNMENT_FILE"
+    echo "|---------|--------------------------|--------|----------------|-----------|--------|----------|---------------|" >> "$ASSIGNMENT_FILE"
+
+    if [[ -z "$task_rows" ]]; then
+        echo "| [add-task-id] | no | [set yes/no with rationale] | [list owned files] | - | - | - | - |" >> "$ASSIGNMENT_FILE"
+        return 0
+    fi
+
+    local idx=0
+    while IFS='|' read -r task_id blocked_by; do
+        [[ -n "$task_id" ]] || continue
+        idx=$((idx + 1))
+
+        local worker_lane="worker-$(( ((idx - 1) % WORKERS) + 1 ))"
+        local reviewer_lane="reviewer-$(( ((idx - 1) % REVIEWERS) + 1 ))"
+        local worker_path="$WORKTREE_ROOT_ABS/$worker_lane"
+        local worker_path_display="$worker_path"
+        if [[ "$worker_path_display" == "$PROJECT_ROOT/"* ]]; then
+            worker_path_display="${worker_path_display#$PROJECT_ROOT/}"
+        fi
+
+        if [[ -z "$blocked_by" ]]; then
+            blocked_by="-"
+        fi
+
+        printf '| %s | no | [set yes if safe to parallelize] | [list owned files/globs] | %s | `%s` | `%s` | `%s` |\n' \
+            "$task_id" "$blocked_by" "$worker_lane" "$reviewer_lane" "$worker_path_display" >> "$ASSIGNMENT_FILE"
+    done <<< "$task_rows"
+}
+
 {
     echo "# Worktree Assignment"
     echo ""
@@ -328,6 +436,8 @@ for ((i = 1; i <= WORKERS; i++)); do
     reviewer_index=$(( ((i - 1) % REVIEWERS) + 1 ))
     printf '| `worker-%s` | `reviewer-%s` |\n' "$i" "$reviewer_index" >> "$ASSIGNMENT_FILE"
 done
+
+append_parallelization_matrix
 
 echo "Worktree lanes ready."
 echo "Assignment file: $ASSIGNMENT_FILE"

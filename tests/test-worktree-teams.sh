@@ -42,6 +42,26 @@ EOF
     )
 }
 
+create_task_table_plan_repo() {
+    local repo_dir="$1"
+    init_test_git_repo "$repo_dir"
+    mkdir -p "$repo_dir/temp"
+    cat > "$repo_dir/temp/plan.md" << 'EOF'
+# Test Plan
+
+| Priority | Task ID | Description | Owner | Files | blockedBy |
+|----------|---------|-------------|-------|-------|-----------|
+| P1 | task1 | Implement setup preflight | claude | scripts/setup-rlcr-loop.sh | - |
+| P1 | task2 | Add matrix generation | codex | scripts/setup-worktree-teams.sh | task1 |
+EOF
+    echo "temp/" > "$repo_dir/.gitignore"
+    (
+        cd "$repo_dir"
+        git add .gitignore
+        git commit -q -m "Add gitignore"
+    )
+}
+
 # ========================================
 # Test: worktree mode defaults to true when env var is enabled
 # ========================================
@@ -262,6 +282,42 @@ else
     fail "state.md exists after setup" "state file path" "not found"
 fi
 
+if [[ -n "$STATE_FILE" && -f "$STATE_FILE" ]]; then
+    ACTIVE_LOOP_DIR_FROM_STATE=$(dirname "$STATE_FILE")
+    ASSIGN_FILE="$ACTIVE_LOOP_DIR_FROM_STATE/worktree-assignment.md"
+    ROUND0_SUMMARY_FILE="$ACTIVE_LOOP_DIR_FROM_STATE/round-0-summary.md"
+
+    if [[ -f "$ASSIGN_FILE" ]]; then
+        pass "setup preflight creates worktree-assignment.md"
+    else
+        fail "setup preflight creates worktree-assignment.md" "assignment file exists" "not found"
+    fi
+
+    if [[ -f "$ASSIGN_FILE" ]] && grep -q "## Parallelization Matrix" "$ASSIGN_FILE"; then
+        pass "worktree assignment includes Parallelization Matrix section"
+    else
+        fail "worktree assignment includes Parallelization Matrix section" "matrix section header" "$(cat "$ASSIGN_FILE" 2>/dev/null || echo 'missing')"
+    fi
+
+    if [[ -f "$ASSIGN_FILE" ]] && grep -q "Parallelizable (yes/no)" "$ASSIGN_FILE"; then
+        pass "worktree assignment matrix includes Parallelizable column"
+    else
+        fail "worktree assignment matrix includes Parallelizable column" "Parallelizable (yes/no)" "$(cat "$ASSIGN_FILE" 2>/dev/null || echo 'missing')"
+    fi
+
+    if [[ -f "$ROUND0_SUMMARY_FILE" ]]; then
+        pass "setup creates round-0 summary template"
+    else
+        fail "setup creates round-0 summary template" "round-0-summary.md exists" "not found"
+    fi
+
+    if [[ -f "$ROUND0_SUMMARY_FILE" ]] && grep -q "^## BitLesson Delta" "$ROUND0_SUMMARY_FILE"; then
+        pass "round-0 summary template includes BitLesson Delta section"
+    else
+        fail "round-0 summary template includes BitLesson Delta section" "BitLesson Delta section" "$(cat "$ROUND0_SUMMARY_FILE" 2>/dev/null || echo 'missing')"
+    fi
+fi
+
 setup_test_dir
 mkdir -p "$TEST_DIR/loop"
 cat > "$TEST_DIR/loop/state.md" << 'EOF'
@@ -332,6 +388,41 @@ if [[ -n "$STATE_FILE" && -f "$STATE_FILE" ]]; then
     fi
 else
     fail "state.md exists for custom worktree root test" "state file path" "not found"
+fi
+
+# ========================================
+# Test: parallelization matrix maps plan tasks and dependencies
+# ========================================
+
+setup_test_dir
+create_task_table_plan_repo "$TEST_DIR/project"
+
+cd "$TEST_DIR/project"
+CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 CLAUDE_PROJECT_DIR="$TEST_DIR/project" \
+    bash "$SETUP_SCRIPT" --agent-teams --worktree-teams temp/plan.md > /dev/null 2>&1 || true
+
+STATE_FILE=$(find "$TEST_DIR/project/.humanize/rlcr" -name "state.md" -type f 2>/dev/null | head -1)
+if [[ -n "$STATE_FILE" && -f "$STATE_FILE" ]]; then
+    ASSIGN_FILE="$(dirname "$STATE_FILE")/worktree-assignment.md"
+    if [[ -f "$ASSIGN_FILE" ]] && grep -q "| task1 |" "$ASSIGN_FILE"; then
+        pass "parallelization matrix includes task1 from plan table"
+    else
+        fail "parallelization matrix includes task1 from plan table" "task1 row in matrix" "$(cat "$ASSIGN_FILE" 2>/dev/null || echo 'missing')"
+    fi
+
+    if [[ -f "$ASSIGN_FILE" ]] && grep -q "| task2 |" "$ASSIGN_FILE" && grep -q "| task1 |" "$ASSIGN_FILE"; then
+        pass "parallelization matrix captures blockedBy dependency"
+    else
+        fail "parallelization matrix captures blockedBy dependency" "task2 row blockedBy task1" "$(cat "$ASSIGN_FILE" 2>/dev/null || echo 'missing')"
+    fi
+
+    if [[ -f "$ASSIGN_FILE" ]] && ! grep -q "\[add-task-id\]" "$ASSIGN_FILE"; then
+        pass "parallelization matrix skips placeholder row when plan tasks exist"
+    else
+        fail "parallelization matrix skips placeholder row when plan tasks exist" "no placeholder matrix row" "$(cat "$ASSIGN_FILE" 2>/dev/null || echo 'missing')"
+    fi
+else
+    fail "state.md exists for matrix mapping test" "state file path" "not found"
 fi
 
 # ========================================
@@ -483,6 +574,23 @@ MOCK_EOF
     export PATH="$TEST_DIR/bin:$PATH"
 }
 
+setup_mock_codex_with_marker() {
+    mkdir -p "$TEST_DIR/bin"
+    local marker_file="$TEST_DIR/codex_called.marker"
+    cat > "$TEST_DIR/bin/codex" << EOF
+#!/bin/bash
+echo "called" > "$marker_file"
+if [[ "\$1" == "exec" ]]; then
+    echo "CONTINUE"
+else
+    echo "No issues"
+fi
+EOF
+    chmod +x "$TEST_DIR/bin/codex"
+    export PATH="$TEST_DIR/bin:$PATH"
+    rm -f "$marker_file"
+}
+
 setup_stophook_test
 setup_mock_codex_impl_feedback
 export XDG_CACHE_HOME="$TEST_DIR/.cache"
@@ -512,6 +620,18 @@ if [[ -f "$NEXT_PROMPT" ]]; then
     fi
 else
     fail "round-4 prompt exists after stop hook in worktree mode" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
+fi
+
+NEXT_SUMMARY="$LOOP_DIR/round-4-summary.md"
+if [[ -f "$NEXT_SUMMARY" ]]; then
+    pass "stop hook creates next-round summary template in implementation phase"
+else
+    fail "stop hook creates next-round summary template in implementation phase" "round-4-summary.md exists" "not found"
+fi
+if [[ -f "$NEXT_SUMMARY" ]] && grep -q "^## BitLesson Delta" "$NEXT_SUMMARY"; then
+    pass "next-round summary template includes BitLesson Delta section"
+else
+    fail "next-round summary template includes BitLesson Delta section" "BitLesson Delta section" "$(cat "$NEXT_SUMMARY" 2>/dev/null || echo 'missing')"
 fi
 
 # Verify malformed worktree_root values from state are not injected into prompts
@@ -569,6 +689,39 @@ if [[ -f "$NEXT_PROMPT" ]]; then
     fi
 else
     fail "round-4 prompt exists for absolute worktree_root test" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
+fi
+
+# ========================================
+# Test: context token guard blocks expensive codex path
+# ========================================
+
+setup_stophook_test
+setup_mock_codex_with_marker
+export XDG_CACHE_HOME="$TEST_DIR/.cache"
+
+LARGE_TRANSCRIPT=$(printf 'x%.0s' {1..2400})
+HOOK_INPUT='{"stop_hook_active": false, "transcript": [{"type":"text","text":"'"$LARGE_TRANSCRIPT"'"}], "session_id": ""}'
+set +e
+TOKEN_GUARD_RESULT=$(echo "$HOOK_INPUT" | HUMANIZE_RLCR_TOKEN_GUARD_TOKENS=100 CLAUDE_PROJECT_DIR="$TEST_DIR" bash "$STOP_HOOK" 2>&1)
+HOOK_EXIT=$?
+set -e
+
+if echo "$TOKEN_GUARD_RESULT" | grep -q '"decision".*block' && echo "$TOKEN_GUARD_RESULT" | grep -qi "context token guard"; then
+    pass "context token guard blocks stop hook before codex review"
+else
+    fail "context token guard blocks stop hook before codex review" "block output mentioning context token guard" "exit=$HOOK_EXIT output=$TOKEN_GUARD_RESULT"
+fi
+
+if [[ ! -f "$TEST_DIR/codex_called.marker" ]]; then
+    pass "context token guard prevents codex invocation"
+else
+    fail "context token guard prevents codex invocation" "codex not called" "codex_called.marker exists"
+fi
+
+if [[ -f "$LOOP_DIR/context-guard-recovery.md" ]]; then
+    pass "context token guard writes recovery note"
+else
+    fail "context token guard writes recovery note" "context-guard-recovery.md exists" "not found"
 fi
 
 # ========================================

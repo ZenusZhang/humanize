@@ -987,6 +987,34 @@ started_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 ---
 EOF
 
+# ========================================
+# Worktree Teams Preflight (Feature 2)
+# ========================================
+# Guarantee document-centered artifacts exist before Round 0 starts.
+if [[ "$WORKTREE_TEAMS" == "true" ]]; then
+    WORKTREE_SETUP_SCRIPT="$SCRIPT_DIR/setup-worktree-teams.sh"
+    if [[ ! -f "$WORKTREE_SETUP_SCRIPT" ]]; then
+        echo "Error: Worktree setup script not found: $WORKTREE_SETUP_SCRIPT" >&2
+        exit 1
+    fi
+
+    echo "Preflight: provisioning worktree lanes and assignment mapping..." >&2
+    WORKTREE_SETUP_CMD=(bash "$WORKTREE_SETUP_SCRIPT" --loop-dir "$LOOP_DIR")
+    if [[ -n "$WORKTREE_ROOT" ]]; then
+        WORKTREE_SETUP_CMD+=(--worktree-root "$WORKTREE_ROOT")
+    fi
+    if ! CLAUDE_PROJECT_DIR="$PROJECT_ROOT" "${WORKTREE_SETUP_CMD[@]}" >/dev/null; then
+        echo "Error: Worktree teams preflight failed." >&2
+        echo "  Expected to create lane worktrees and worktree-assignment.md before loop starts." >&2
+        exit 1
+    fi
+
+    if [[ ! -s "$LOOP_DIR/worktree-assignment.md" ]]; then
+        echo "Error: worktree-assignment.md was not created or is empty after preflight." >&2
+        exit 1
+    fi
+fi
+
 # Create signal file for PostToolUse hook to record session_id
 # The hook will read the session_id from its JSON input and patch state.md
 # Format: line 1 = state file path, line 2 = command marker for verification
@@ -1133,6 +1161,44 @@ fi  # End of skip-impl goal tracker handling
 # ========================================
 
 SUMMARY_PATH="$LOOP_DIR/round-0-summary.md"
+
+write_summary_template() {
+    local target_file="$1"
+    local phase_label="$2"
+    local include_bitlesson="$3"
+
+    if [[ -f "$target_file" ]]; then
+        return 0
+    fi
+
+    cat > "$target_file" << EOF
+# ${phase_label} Summary
+
+## Work Completed
+- [Describe what was implemented in this phase]
+
+## Files Changed
+- [List created/modified files]
+
+## Validation
+- [List tests/commands run and outcomes]
+
+## Remaining Items
+- [List unresolved items, if any]
+EOF
+
+    if [[ "$include_bitlesson" == "true" ]]; then
+        cat >> "$target_file" << 'EOF'
+
+## BitLesson Delta
+- Action: none|add|update
+- Lesson ID(s): NONE
+- Notes: [what changed and why]
+EOF
+    fi
+}
+
+write_summary_template "$SUMMARY_PATH" "Round 0" "true"
 
 if [[ "$SKIP_IMPL" == "true" ]]; then
     # Skip-impl mode: create a prompt for code review only

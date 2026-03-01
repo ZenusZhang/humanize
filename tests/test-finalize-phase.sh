@@ -539,6 +539,24 @@ else
     fail "COMPLETE Finalize entry" "block with finalize-state.md" "exit $EXIT_CODE, files: $(ls $LOOP_DIR/*state*.md 2>/dev/null || echo 'none'), output: $RESULT"
 fi
 
+if [[ -f "$LOOP_DIR/finalize-summary.md" ]]; then
+    pass "Finalize entry creates finalize-summary template"
+else
+    fail "Finalize entry creates finalize-summary template" "finalize-summary.md exists" "not found"
+fi
+
+if [[ -f "$LOOP_DIR/finalize-summary.md" ]] && grep -q "^## Work Completed" "$LOOP_DIR/finalize-summary.md"; then
+    pass "Finalize summary template includes standard summary sections"
+else
+    fail "Finalize summary template includes standard summary sections" "Work Completed section" "$(cat "$LOOP_DIR/finalize-summary.md" 2>/dev/null || echo 'missing')"
+fi
+
+if [[ -f "$LOOP_DIR/finalize-summary.md" ]] && ! grep -q "^## BitLesson Delta" "$LOOP_DIR/finalize-summary.md"; then
+    pass "Finalize summary template omits BitLesson Delta section"
+else
+    fail "Finalize summary template omits BitLesson Delta section" "no BitLesson Delta section" "$(cat "$LOOP_DIR/finalize-summary.md" 2>/dev/null || echo 'missing')"
+fi
+
 # T-NEG-1: Max iterations skips Finalize
 echo "T-NEG-1: Max iterations skips Finalize Phase"
 rm -rf "$TEST_DIR/.humanize"
