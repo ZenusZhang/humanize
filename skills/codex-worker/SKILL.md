@@ -26,4 +26,4 @@ Run:
 ## Notes
 
 - Default worker model is `gpt-5.3-codex:xhigh`
-- Analyzer/reviewer should use `gpt-5.2:xhigh` via `/humanize:ask-codex`
+- Analyzer/reviewer should use `gpt-5.2:xhigh` (non-codex) via `/humanize:ask-codex`

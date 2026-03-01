@@ -6,7 +6,7 @@ as the source of truth for task routing and lane ownership.
 
 Roles (recorded in `worktree-assignment.md`):
 - **Worker (Codex CLI)**: implement assigned tasks in isolated worktrees via `/humanize:codex-worker` (default: `gpt-5.3-codex:xhigh`)
-- **Reviewer (Codex CLI)**: review worker outputs independently before merge (default: `gpt-5.2:xhigh`)
+- **Reviewer (Codex CLI)**: review worker outputs independently before merge (default: `gpt-5.2:xhigh`, non-codex)
 
 ### Required Protocol
 

@@ -75,7 +75,7 @@ Example: "The implementation includes core feature X with basic validation"
 
 Each task must include exactly one routing tag:
 - `coding`: implemented by Codex worker (`/humanize:codex-worker`, default: `gpt-5.3-codex:xhigh`)
-- `analyze`: executed via Codex analyzer (`/humanize:ask-codex`, default: `gpt-5.2:xhigh`)
+- `analyze`: executed via Codex analyzer (`/humanize:ask-codex`, default: `gpt-5.2:xhigh`, non-codex)
 
 | Task ID | Description | Target AC | Tag (`coding`/`analyze`) | Depends On |
 |---------|-------------|-----------|----------------------------|------------|

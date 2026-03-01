@@ -1,6 +1,6 @@
 # Humanize
 
-**Current Version: 1.10.9**
+**Current Version: 1.10.10**
 
 > Derived from the [GAAC (GitHub-as-a-Context)](https://github.com/SihaoLiu/gaac) project.
 
@@ -16,8 +16,8 @@ A Claude Code plugin that provides iterative development with Codex review. Huma
 
 **Iteration over Perfection**: Instead of expecting perfect output in one shot, Humanize leverages an iterative feedback loop where:
 - Codex worker executes `coding` tasks (default: `gpt-5.3-codex:xhigh`)
-- Codex analyzer executes `analyze` tasks (default: `gpt-5.2:xhigh`)
-- Codex reviewer independently reviews progress (default: `gpt-5.2:xhigh`)
+- Codex analyzer executes `analyze` tasks (default: `gpt-5.2:xhigh`, non-codex)
+- Codex reviewer independently reviews progress (default: `gpt-5.2:xhigh`, non-codex)
 - Issues are caught and addressed early
 - Work continues until all acceptance criteria are met
 
@@ -101,7 +101,7 @@ HUMANIZE_CODEX_BYPASS_SANDBOX=true claude --plugin-dir /path/to/humanize
 ```mermaid
 flowchart LR
     Plan["Your Plan<br/>(plan.md)"] --> Worker["Task Routing<br/>(coding->Codex Worker, analyze->Codex Analyzer)"]
-    Worker --> Reviewer["Codex Reviews<br/>Summary (gpt-5.2)"]
+    Worker --> Reviewer["Codex Reviews<br/>Summary (gpt-5.2, non-codex)"]
     Reviewer -->|Feedback Loop| Worker
     Reviewer -->|COMPLETE| Review["Code Review<br/>(codex review)"]
     Review -->|Issues Found| Worker
@@ -111,7 +111,7 @@ flowchart LR
 The loop has two phases:
 1. **Implementation Phase**: Execute tasks by tag, then Codex reviews summaries until COMPLETE
    - `coding` tag -> execute via `/humanize:codex-worker` (default: `gpt-5.3-codex:xhigh`)
-   - `analyze` tag -> execute via `/humanize:ask-codex` (default: `gpt-5.2:xhigh`)
+   - `analyze` tag -> execute via `/humanize:ask-codex` (default: `gpt-5.2:xhigh`, non-codex)
 2. **Review Phase**: `codex review --base <branch>` checks code quality with `[P0-9]` severity markers
 
 ### Sub-Agent Cross-Review Protocol
@@ -173,7 +173,7 @@ OPTIONS:
   --plan-file <path>     Explicit plan file path (alternative to positional arg)
   --max <N>              Maximum iterations before auto-stop (default: 42)
   --codex-model <MODEL:EFFORT>
-                         Codex model and reasoning effort (default: gpt-5.2:xhigh)
+                         Codex model and reasoning effort (default: gpt-5.2:xhigh, non-codex)
   --codex-timeout <SECONDS>
                          Timeout for each Codex review in seconds (default: 5400)
   --track-plan-file      Indicate plan file should be tracked in git (must be clean)
@@ -285,7 +285,7 @@ BOT FLAGS (at least one required):
 OPTIONS:
   --max <N>              Maximum iterations before auto-stop (default: 42)
   --codex-model <MODEL:EFFORT>
-                         Codex model and reasoning effort (default: gpt-5.2:xhigh)
+                         Codex model and reasoning effort (default: gpt-5.2:xhigh, non-codex)
   --codex-timeout <SECONDS>
                          Timeout for each Codex review in seconds (default: 900)
   -h, --help             Show help message
@@ -298,7 +298,7 @@ OPTIONS:
 
 OPTIONS:
   --codex-model <MODEL:EFFORT>
-                         Codex model and reasoning effort (default: gpt-5.2:xhigh)
+                         Codex model and reasoning effort (default: gpt-5.2:xhigh, non-codex)
   --codex-timeout <SECONDS>
                          Timeout for the Codex query in seconds (default: 3600)
   -h, --help             Show help message

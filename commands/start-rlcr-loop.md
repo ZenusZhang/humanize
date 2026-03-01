@@ -17,7 +17,7 @@ This command starts an iterative development loop where:
 
 1. You execute the implementation plan with task-tag routing
    - `coding` tasks: execute via `/humanize:codex-worker` (default: `gpt-5.3-codex:xhigh`)
-   - `analyze` tasks: execute via `/humanize:ask-codex` (default: `gpt-5.2:xhigh`)
+   - `analyze` tasks: execute via `/humanize:ask-codex` (default: `gpt-5.2:xhigh`, non-codex)
 2. Write a summary of your work to the specified summary file
 3. When you try to exit, Codex reviews your summary
 4. If Codex finds issues, you receive feedback and continue
