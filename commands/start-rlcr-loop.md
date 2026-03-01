@@ -1,6 +1,6 @@
 ---
 description: "Start iterative loop with Codex review"
-argument-hint: "[path/to/plan.md | --plan-file path/to/plan.md] [--max N] [--codex-model MODEL:EFFORT] [--codex-timeout SECONDS] [--track-plan-file] [--push-every-round] [--base-branch BRANCH] [--full-review-round N] [--skip-impl] [--claude-answer-codex] [--agent-teams|--no-agent-teams] [--worktree-teams|--no-worktree-teams] [--worktree-root PATH]"
+argument-hint: "[path/to/plan.md | --plan-file path/to/plan.md] [--max N] [--codex-model MODEL:EFFORT] [--codex-timeout SECONDS] [--track-plan-file] [--push-every-round] [--base-branch BRANCH] [--full-review-round N] [--skip-impl] [--claude-answer-codex] [--agent-teams|--no-agent-teams] [--worktree-teams|--no-worktree-teams] [--worktree-root PATH] [--allow-empty-bitlesson-none|--require-bitlesson-entry-for-none]"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-rlcr-loop.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
@@ -68,6 +68,7 @@ Per round requirements:
 4. Include `## BitLesson Delta` in the round summary with `Action: none|add|update`
 
 If a problem is solved only after multiple rounds, add or update a precise lesson entry in `bitlesson.md` (specific problem + specific solution).
+By default, empty `bitlesson.md` does not block `Action: none`; use `--require-bitlesson-entry-for-none` to enforce strict blocking.
 
 ## Stopping the Loop
 

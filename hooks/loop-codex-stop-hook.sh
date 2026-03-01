@@ -96,6 +96,7 @@ RAW_MAX_ITERATIONS=$(echo "$RAW_FRONTMATTER" | grep "^max_iterations:" || true)
 RAW_FULL_REVIEW_ROUND=$(echo "$RAW_FRONTMATTER" | grep "^full_review_round:" || true)
 RAW_BITLESSON_REQUIRED=$(echo "$RAW_FRONTMATTER" | grep "^bitlesson_required:" || true)
 RAW_BITLESSON_FILE=$(echo "$RAW_FRONTMATTER" | grep "^bitlesson_file:" || true)
+RAW_BITLESSON_ALLOW_EMPTY_NONE=$(echo "$RAW_FRONTMATTER" | grep "^bitlesson_allow_empty_none:" || true)
 
 # Use tolerant parsing to extract values
 # Note: parse_state_file applies defaults for missing current_round/max_iterations
@@ -138,6 +139,16 @@ fi
 BITLESSON_FILE="$PROJECT_ROOT/$BITLESSON_FILE_REL"
 if [[ "$BITLESSON_REQUIRED" != "true" && -f "$BITLESSON_FILE" ]]; then
     BITLESSON_REQUIRED="true"
+fi
+BITLESSON_ALLOW_EMPTY_NONE="true"
+if [[ -n "$RAW_BITLESSON_ALLOW_EMPTY_NONE" ]]; then
+    BITLESSON_ALLOW_EMPTY_NONE=$(echo "$RAW_BITLESSON_ALLOW_EMPTY_NONE" | sed 's/^bitlesson_allow_empty_none:[[:space:]]*//' | tr -d ' "')
+fi
+if [[ "${HUMANIZE_ALLOW_EMPTY_BITLESSON_NONE:-}" == "true" ]]; then
+    BITLESSON_ALLOW_EMPTY_NONE="true"
+fi
+if [[ "$BITLESSON_ALLOW_EMPTY_NONE" != "true" && "$BITLESSON_ALLOW_EMPTY_NONE" != "false" ]]; then
+    BITLESSON_ALLOW_EMPTY_NONE="true"
 fi
 # Re-validate Codex Model and Effort for YAML safety (in case state.md was manually edited)
 # Use same validation patterns as setup-rlcr-loop.sh
@@ -864,7 +875,7 @@ Your \`## BitLesson Delta\` section exists, but it must include one action:
             exit 0
         fi
 
-        if [[ "$CURRENT_ROUND" -gt 0 ]] && [[ "$CONCRETE_BITLESSON_COUNT" -eq 0 ]]; then
+        if [[ "$CURRENT_ROUND" -gt 0 ]] && [[ "$CONCRETE_BITLESSON_COUNT" -eq 0 ]] && [[ "$BITLESSON_ALLOW_EMPTY_NONE" != "true" ]]; then
             FALLBACK="# BitLesson Recording Required
 
 \`Action: none\` is not allowed in round {{CURRENT_ROUND}} when {{BITLESSON_FILE}} still has no concrete lesson entries.

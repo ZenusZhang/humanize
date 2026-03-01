@@ -126,6 +126,7 @@ RLCR also uses a project-level `bitlesson.md` (in repository root) for reusable 
 - If missing, `start-rlcr-loop` initializes `bitlesson.md` automatically from the strict template.
 - Before each task/sub-task, run `bitlesson-selector` and apply selected lesson IDs (or `NONE`).
 - Every round summary must include `## BitLesson Delta` with `Action: none|add|update`.
+- By default, empty `bitlesson.md` does not block `Action: none`; use `--require-bitlesson-entry-for-none` to enforce strict mode.
 - If a problem is solved only after multiple rounds, add/update a precise entry in `bitlesson.md`.
 
 ### Quick Start
@@ -186,6 +187,12 @@ OPTIONS:
   --worktree-teams       Enable document-centered worktree orchestration via git worktree
   --no-worktree-teams    Disable worktree orchestration for this loop
   --worktree-root <PATH> Root directory for generated worktrees
+  --allow-empty-bitlesson-none
+                         Allow `Action: none` when `bitlesson.md` has no concrete entries
+                         (default: enabled)
+  --require-bitlesson-entry-for-none
+                         Enforce strict mode: round>0 `Action: none` requires concrete
+                         bitlesson entries
   -h, --help             Show help message
 ```
 

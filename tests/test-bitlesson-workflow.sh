@@ -157,10 +157,13 @@ else
     fail "round-0 prompt requires bitlesson-selector invocation" "bitlesson-selector text" "missing"
 fi
 
-if [[ -f "$STATE_FILE" ]] && grep -q "^bitlesson_required: true$" "$STATE_FILE" && grep -q "^bitlesson_file: bitlesson.md$" "$STATE_FILE"; then
-    pass "state file records bitlesson requirement fields"
+if [[ -f "$STATE_FILE" ]] && \
+   grep -q "^bitlesson_required: true$" "$STATE_FILE" && \
+   grep -q "^bitlesson_file: bitlesson.md$" "$STATE_FILE" && \
+   grep -q "^bitlesson_allow_empty_none: true$" "$STATE_FILE"; then
+    pass "state file records bitlesson requirement fields and default allow-empty-none"
 else
-    fail "state file records bitlesson requirement fields" "bitlesson_required/bitlesson_file set" "missing"
+    fail "state file records bitlesson requirement fields and default allow-empty-none" "bitlesson_required/bitlesson_file/bitlesson_allow_empty_none set" "missing"
 fi
 
 # ========================================
@@ -272,7 +275,7 @@ else
 fi
 
 # ========================================
-# Test 7: Stop hook blocks round>0 Action:none when bitlesson has no concrete entries
+# Test 7: Stop hook allows round>0 Action:none by default when bitlesson has no concrete entries
 # ========================================
 
 cp "$BITLESSON_TEMPLATE_FILE" "$TEST_DIR/project/bitlesson.md"
@@ -290,11 +293,24 @@ Did follow-up implementation.
 - Notes: No lessons.
 EOF
 
-NONE_BLOCK_RESULT=$(echo "$HOOK_INPUT" | CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$STOP_HOOK")
-if echo "$NONE_BLOCK_RESULT" | grep -q '"decision": "block"' && echo "$NONE_BLOCK_RESULT" | grep -q "BitLesson"; then
-    pass "stop hook blocks round>0 Action:none when bitlesson.md has no concrete entries"
+NONE_DEFAULT_RESULT=$(echo "$HOOK_INPUT" | CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$STOP_HOOK")
+if echo "$NONE_DEFAULT_RESULT" | grep -q "BitLesson Recording Required"; then
+    fail "stop hook default allows round>0 Action:none when bitlesson.md has no concrete entries" "no BitLesson Recording Required block" "$NONE_DEFAULT_RESULT"
 else
-    fail "stop hook blocks round>0 Action:none when bitlesson.md has no concrete entries" "block decision mentioning BitLesson recording requirement" "$NONE_BLOCK_RESULT"
+    pass "stop hook default allows round>0 Action:none when bitlesson.md has no concrete entries"
+fi
+
+# ========================================
+# Test 8: Strict mode blocks round>0 Action:none when bitlesson has no concrete entries
+# ========================================
+
+sed -i 's/^bitlesson_allow_empty_none: true$/bitlesson_allow_empty_none: false/' "$STATE_FILE"
+
+NONE_STRICT_RESULT=$(echo "$HOOK_INPUT" | CLAUDE_PROJECT_DIR="$TEST_DIR/project" bash "$STOP_HOOK")
+if echo "$NONE_STRICT_RESULT" | grep -q '"decision": "block"' && echo "$NONE_STRICT_RESULT" | grep -q "BitLesson"; then
+    pass "strict mode blocks round>0 Action:none when bitlesson.md has no concrete entries"
+else
+    fail "strict mode blocks round>0 Action:none when bitlesson.md has no concrete entries" "block decision mentioning BitLesson recording requirement" "$NONE_STRICT_RESULT"
 fi
 
 print_test_summary "BitLesson Workflow Tests"

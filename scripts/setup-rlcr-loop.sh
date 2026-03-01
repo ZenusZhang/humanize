@@ -53,6 +53,7 @@ WORKTREE_TEAMS="true"
 AGENT_TEAMS_EXPLICIT="false"
 WORKTREE_TEAMS_EXPLICIT="false"
 WORKTREE_ROOT=""
+BITLESSON_ALLOW_EMPTY_NONE="true"
 
 show_help() {
     cat << 'HELP_EOF'
@@ -99,6 +100,12 @@ OPTIONS:
                        (python3 preferred, or GNU readlink with -f/-m).
   --worktree-root <PATH>
                        Root directory for generated worktrees (default: .humanize/worktrees/<loop-timestamp>)
+  --allow-empty-bitlesson-none
+                       Allow `Action: none` even if `bitlesson.md` has no concrete entries
+                       (default: enabled)
+  --require-bitlesson-entry-for-none
+                       Enforce strict mode: in round > 0, `Action: none` requires at least
+                       one concrete lesson entry in `bitlesson.md`
   -h, --help           Show this help message
 
 DESCRIPTION:
@@ -267,6 +274,14 @@ while [[ $# -gt 0 ]]; do
             fi
             WORKTREE_ROOT="$2"
             shift 2
+            ;;
+        --allow-empty-bitlesson-none)
+            BITLESSON_ALLOW_EMPTY_NONE="true"
+            shift
+            ;;
+        --require-bitlesson-entry-for-none)
+            BITLESSON_ALLOW_EMPTY_NONE="false"
+            shift
             ;;
         -*)
             echo "Unknown option: $1" >&2
@@ -983,6 +998,7 @@ worktree_teams: $WORKTREE_TEAMS
 worktree_root: $WORKTREE_ROOT
 bitlesson_required: true
 bitlesson_file: $BITLESSON_FILE_REL
+bitlesson_allow_empty_none: $BITLESSON_ALLOW_EMPTY_NONE
 started_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 ---
 EOF
