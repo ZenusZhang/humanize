@@ -16,6 +16,33 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Max parallel test jobs (throttle to avoid resource exhaustion in small CI runners).
+# Override with HUMANIZE_TEST_JOBS=<N>.
+default_jobs() {
+    local n=4
+    if command -v getconf >/dev/null 2>&1; then
+        n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+    fi
+    [[ "$n" =~ ^[0-9]+$ ]] || n=4
+    # Cap by default to keep memory/process usage bounded.
+    [[ "$n" -gt 8 ]] && n=8
+    [[ "$n" -lt 1 ]] && n=1
+    echo "$n"
+}
+
+MAX_JOBS="${HUMANIZE_TEST_JOBS:-$(default_jobs)}"
+if ! [[ "$MAX_JOBS" =~ ^[0-9]+$ ]] || [[ "$MAX_JOBS" -lt 1 ]]; then
+    echo "Error: HUMANIZE_TEST_JOBS must be an integer >= 1, got: ${HUMANIZE_TEST_JOBS:-}" >&2
+    exit 1
+fi
+
+# wait -n is available starting from bash 4.3
+supports_wait_n() {
+    local major="${BASH_VERSINFO[0]:-0}"
+    local minor="${BASH_VERSINFO[1]:-0}"
+    [[ "$major" -gt 4 ]] || ( [[ "$major" -eq 4 ]] && [[ "$minor" -ge 3 ]] )
+}
+
 # Colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -26,6 +53,7 @@ NC='\033[0m'
 echo "========================================"
 echo "Running All Humanize Plugin Tests"
 echo "========================================"
+echo "Parallel jobs: $MAX_JOBS"
 echo ""
 
 # Test suites to run
@@ -117,6 +145,7 @@ format_ms() {
 # Launch all test suites in parallel
 declare -A PIDS          # suite -> PID
 declare -A SKIPPED       # suite -> reason
+ACTIVE_PIDS=()
 
 for suite in "${TEST_SUITES[@]}"; do
     suite_path="$SCRIPT_DIR/$suite"
@@ -150,6 +179,26 @@ for suite in "${TEST_SUITES[@]}"; do
         ) &
     fi
     PIDS["$suite"]=$!
+    ACTIVE_PIDS+=("${PIDS[$suite]}")
+
+    # Throttle background jobs
+    while [[ "${#ACTIVE_PIDS[@]}" -ge "$MAX_JOBS" ]]; do
+        if supports_wait_n; then
+            wait -n 2>/dev/null || true
+            # Prune finished PIDs from ACTIVE_PIDS
+            still_running=()
+            for pid in "${ACTIVE_PIDS[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    still_running+=("$pid")
+                fi
+            done
+            ACTIVE_PIDS=("${still_running[@]}")
+        else
+            # Fallback: wait for the oldest PID (less efficient but portable in older bash)
+            wait "${ACTIVE_PIDS[0]}" 2>/dev/null || true
+            ACTIVE_PIDS=("${ACTIVE_PIDS[@]:1}")
+        fi
+    done
 done
 
 # Wait for all and collect results

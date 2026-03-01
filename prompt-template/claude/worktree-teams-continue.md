@@ -13,8 +13,8 @@ Keep using document-centered worktree orchestration in this round.
    - assigned branch
    - file ownership boundary
 5. Ensure each worker runs `bitlesson-selector` for each sub-task and records selected lesson IDs (or `NONE`) in the lane report.
-6. Ensure worker Task invocations explicitly set `model: sonnet`.
+6. Ensure each worker run uses `/humanize:codex-worker --workdir <worktree path>` (default: `gpt-5.3-codex:xhigh`).
 7. Require reviewer-agent signoff per lane before integrating changes.
-8. Ensure every Task prompt includes explicit Claude/Codex cross-review context:
-   - "your output will be reviewed by Codex", or
-   - "you are reviewing Codex-produced findings/results."
+8. Ensure every worker/reviewer prompt includes explicit cross-vendor review context:
+   - worker: "your output will be reviewed independently (cross-vendor style)"
+   - reviewer: "you are reviewing findings/results produced by an independent worker (cross-vendor style)"

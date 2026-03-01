@@ -1,6 +1,6 @@
 # Humanize
 
-**Current Version: 1.10.8**
+**Current Version: 1.10.9**
 
 > Derived from the [GAAC (GitHub-as-a-Context)](https://github.com/SihaoLiu/gaac) project.
 
@@ -10,13 +10,14 @@
 
 The name can also be interpreted as **Reinforcement Learning with Code Review** - reflecting the iterative improvement cycle where AI-generated code is continuously refined through external review feedback.
 
-A Claude Code plugin that provides iterative development with Codex review. Humanize creates a feedback loop where Claude executes `coding` tasks, Codex executes `analyze` tasks, and Codex independently reviews progress.
+A Claude Code plugin that provides iterative development with Codex review. Humanize creates a feedback loop where a Codex CLI **worker** executes `coding` tasks, a separate Codex CLI **analyzer** executes `analyze` tasks, and an independent Codex CLI **reviewer** reviews progress (cross-vendor style, even if all models are OpenAI today).
 
 ## Core Philosophy
 
 **Iteration over Perfection**: Instead of expecting perfect output in one shot, Humanize leverages an iterative feedback loop where:
-- Claude executes `coding` tasks and Codex executes `analyze` tasks
-- Codex independently reviews progress
+- Codex worker executes `coding` tasks (default: `gpt-5.3-codex:xhigh`)
+- Codex analyzer executes `analyze` tasks (default: `gpt-5.2:xhigh`)
+- Codex reviewer independently reviews progress (default: `gpt-5.2:xhigh`)
 - Issues are caught and addressed early
 - Work continues until all acceptance criteria are met
 
@@ -51,7 +52,7 @@ claude --plugin-dir /path/to/humanize
 
 ### Prerequisites
 
-- `codex` - OpenAI Codex CLI (for review). Check with `codex --version`.
+- `codex` - OpenAI Codex CLI (worker/analyze/review). Check with `codex --version`.
 - `python3` (recommended) or GNU `readlink` with `-f`/`-m` support when using `--worktree-teams`.
 
 ### Environment Variables
@@ -99,26 +100,25 @@ HUMANIZE_CODEX_BYPASS_SANDBOX=true claude --plugin-dir /path/to/humanize
 
 ```mermaid
 flowchart LR
-    Plan["Your Plan<br/>(plan.md)"] --> Claude["Task Routing<br/>(coding->Claude, analyze->Codex)"]
-    Claude --> Codex["Codex Reviews<br/>Summary"]
-    Codex -->|Feedback Loop| Claude
-    Codex -->|COMPLETE| Review["Code Review<br/>(codex review)"]
-    Review -->|Issues Found| Claude
+    Plan["Your Plan<br/>(plan.md)"] --> Worker["Task Routing<br/>(coding->Codex Worker, analyze->Codex Analyzer)"]
+    Worker --> Reviewer["Codex Reviews<br/>Summary (gpt-5.2)"]
+    Reviewer -->|Feedback Loop| Worker
+    Reviewer -->|COMPLETE| Review["Code Review<br/>(codex review)"]
+    Review -->|Issues Found| Worker
     Review -->|No Issues| Done((Done))
 ```
 
 The loop has two phases:
 1. **Implementation Phase**: Execute tasks by tag, then Codex reviews summaries until COMPLETE
-   - `coding` tag -> Claude executes directly
-   - `analyze` tag -> execute via `/humanize:ask-codex`
+   - `coding` tag -> execute via `/humanize:codex-worker` (default: `gpt-5.3-codex:xhigh`)
+   - `analyze` tag -> execute via `/humanize:ask-codex` (default: `gpt-5.2:xhigh`)
 2. **Review Phase**: `codex review --base <branch>` checks code quality with `[P0-9]` severity markers
 
 ### Sub-Agent Cross-Review Protocol
 
-For every sub-agent call, include explicit cross-vendor context:
-- Claude-side sub-agent calls must state that output will be reviewed by Codex.
-- Codex-side calls must state that Codex is reviewing/analyzing Claude-produced material (or user draft) and Claude will consume the result.
-- If the sub-agent is reviewing another side's output, explicitly name both sides (`Claude` and `Codex`).
+For every worker/analyzer/reviewer call, include explicit cross-vendor review context (even if all models are OpenAI today):
+- Worker calls must state that output will be reviewed independently (cross-vendor style).
+- Analyzer/reviewer calls must state they are reviewing worker-produced material and their output will be consumed by the coordinator/worker.
 
 ### BitLesson Workflow (Project-Level Knowledge)
 
@@ -159,6 +159,7 @@ RLCR also uses a project-level `bitlesson.md` (in repository root) for reusable 
 | `/start-pr-loop --claude\|--codex` | Start PR review loop with bot monitoring |
 | `/cancel-pr-loop` | Cancel active PR loop |
 | `/ask-codex [question]` | One-shot consultation with Codex |
+| `/codex-worker [task]` | One-shot implementation run with Codex CLI |
 | `/setup-worktree-teams [options]` | Provision worker/reviewer git worktree lanes for RLCR agent teams |
 
 ### Command Options

@@ -35,7 +35,7 @@ _humanize_monitor_skill() {
     # Check if .humanize/skill exists
     if [[ ! -d "$skill_dir" ]]; then
         echo "Error: $skill_dir directory not found in current directory"
-        echo "Run /humanize:ask-codex first to create skill invocations"
+        echo "Run /humanize:ask-codex or /humanize:codex-worker first to create skill invocations"
         return 1
     fi
 

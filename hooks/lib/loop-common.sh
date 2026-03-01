@@ -43,8 +43,16 @@ readonly FIELD_WORKTREE_ROOT="worktree_root"
 
 # Default Codex configuration (single source of truth - all scripts reference this)
 # Both use :- so scripts can override before sourcing when needed.
+#
+# Role split:
+# - Analyzer/Reviewer: gpt-5.2 (non-codex)
+# - Worker (implementation): gpt-5.3-codex
 DEFAULT_CODEX_MODEL="${DEFAULT_CODEX_MODEL:-gpt-5.2}"
 DEFAULT_CODEX_EFFORT="${DEFAULT_CODEX_EFFORT:-xhigh}"
+
+# Default worker configuration (used by /humanize:codex-worker).
+DEFAULT_CODEX_WORKER_MODEL="${DEFAULT_CODEX_WORKER_MODEL:-gpt-5.3-codex}"
+DEFAULT_CODEX_WORKER_EFFORT="${DEFAULT_CODEX_WORKER_EFFORT:-xhigh}"
 
 # Codex review markers
 readonly MARKER_COMPLETE="COMPLETE"

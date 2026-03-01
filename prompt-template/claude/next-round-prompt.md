@@ -14,9 +14,9 @@ You are strictly prohibited from only addressing the most important issues - you
 
 ## Sub-Agent Cross-Review Protocol (MANDATORY)
 
-For every sub-agent invocation in this round (Task agents, `bitlesson-selector`, code simplifier, etc.), include explicit Claude/Codex context in the prompt:
-- Either: "Your output will be reviewed by Codex."
-- Or: "You are reviewing Codex-produced findings/results."
+For every sub-agent invocation in this round (Task agents, `bitlesson-selector`, code simplifier, etc.), include explicit cross-vendor review context in the prompt (even if all models are OpenAI today):
+- Either: "Your output will be reviewed independently (cross-vendor style)."
+- Or: "You are reviewing findings/results produced by an independent worker (cross-vendor style)."
 
 ---
 Below is Codex's review result:

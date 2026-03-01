@@ -5,8 +5,8 @@ not by a single scheduler role. Keep `plan.md`, `goal-tracker.md`, and `worktree
 as the source of truth for task routing and lane ownership.
 
 Roles (recorded in `worktree-assignment.md`):
-- **Worker Agents**: implement assigned tasks in isolated worktrees
-- **Reviewer Agents**: review worker outputs independently before merge
+- **Worker (Codex CLI)**: implement assigned tasks in isolated worktrees via `/humanize:codex-worker` (default: `gpt-5.3-codex:xhigh`)
+- **Reviewer (Codex CLI)**: review worker outputs independently before merge (default: `gpt-5.2:xhigh`)
 
 ### Required Protocol
 
@@ -15,10 +15,10 @@ Roles (recorded in `worktree-assignment.md`):
 3. Use isolated `git worktree` directories per lane to avoid silent overwrite conflicts.
 4. Never assign two active workers to the same file in parallel. If overlap is required, enforce order via `blockedBy`.
 5. For every worker task, require running `bitlesson-selector` before coding and record selected lesson IDs (or `NONE`) in the lane notes.
-6. When spawning worker agents, explicitly set `model: sonnet` in each Task tool invocation.
-7. In every worker/reviewer Task prompt, add explicit Claude/Codex context:
-   - worker/explorer: "your output will be reviewed by Codex"
-   - reviewer over Codex feedback: "you are reviewing Codex-produced findings/results"
+6. When invoking `/humanize:codex-worker` for a lane, pass `--workdir <worktree path>` and keep the default `gpt-5.3-codex:xhigh` unless there is a concrete reason to override.
+7. In every worker/reviewer prompt, add explicit cross-vendor context (even if all models are OpenAI today):
+   - worker: "your output will be reviewed independently (cross-vendor style)"
+   - reviewer: "you are reviewing findings/results produced by an independent worker (cross-vendor style)"
 
 Use this table format (store it in `worktree-assignment.md` or `plan.md`):
 
@@ -27,7 +27,7 @@ Use this table format (store it in `worktree-assignment.md` or `plan.md`):
 
 ### Worktree Setup
 
-Before spawning implementation teammates, create worktree lanes:
+Before running worker tasks, create worktree lanes:
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/setup-worktree-teams.sh" --workers <N> --reviewers <M>

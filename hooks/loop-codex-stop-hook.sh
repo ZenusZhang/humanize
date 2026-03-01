@@ -1558,8 +1558,8 @@ append_task_tag_routing_note() {
 ## Task Tag Routing Reminder
 
 Follow the plan's per-task routing tags strictly:
-- `coding` task -> Claude executes directly
-- `analyze` task -> execute via `/humanize:ask-codex`, then integrate the result
+- `coding` task -> execute via `/humanize:codex-worker` (default: `gpt-5.3-codex:xhigh`)
+- `analyze` task -> execute via `/humanize:ask-codex` (default: `gpt-5.2:xhigh`), then integrate the result
 - Keep Goal Tracker Active Tasks columns `Tag` and `Owner` aligned with execution
 ROUTING_EOF
 }
