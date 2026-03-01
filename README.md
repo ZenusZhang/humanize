@@ -153,6 +153,7 @@ RLCR also uses a project-level `bitlesson.md` (in repository root) for reusable 
 | Command | Purpose |
 |---------|---------|
 | `/start-rlcr-loop <plan.md>` | Start iterative development with Codex review |
+| `/continue-rlcr-loop` | Continue an active RLCR loop from on-disk state (helpful after starting a fresh session) |
 | `/cancel-rlcr-loop` | Cancel active loop |
 | `/gen-plan --input <draft.md> --output <plan.md>` | Generate structured plan from draft |
 | `/start-pr-loop --claude\|--codex` | Start PR review loop with bot monitoring |
