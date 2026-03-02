@@ -230,19 +230,65 @@ def build_graph(
 # ---------------------------------------------------------------------------
 
 
+def detect_cycle(graph: dict[str, set[str]]) -> list[str] | None:
+    """
+    Perform a DFS-based cycle detection on a directed graph.
+
+    Each key in graph maps to a set of prerequisite (dependency) task IDs.
+    The DFS traverses edges from a task to its dependencies.
+
+    Returns None if the graph is a valid DAG (no cycle found).
+    Returns a list of task IDs representing the cycle path if a cycle is
+    detected (e.g., ["task1", "task2", "task1"]).
+    """
+    # DFS color states: 0 = unvisited, 1 = in current path (gray), 2 = done (black)
+    color: dict[str, int] = {node: 0 for node in graph}
+    # Track the DFS path stack for cycle reconstruction
+    path: list[str] = []
+
+    def dfs(node: str) -> list[str] | None:
+        color[node] = 1
+        path.append(node)
+        for neighbor in graph.get(node, set()):
+            if neighbor not in color:
+                # Neighbor is a dependency referenced but not a top-level key;
+                # treat as a leaf (no outgoing edges), skip.
+                continue
+            if color[neighbor] == 1:
+                # Back edge found: neighbor is on the current DFS path -> cycle
+                cycle_start = path.index(neighbor)
+                return path[cycle_start:] + [neighbor]
+            if color[neighbor] == 0:
+                result = dfs(neighbor)
+                if result is not None:
+                    return result
+        path.pop()
+        color[node] = 2
+        return None
+
+    for node in list(graph.keys()):
+        if color[node] == 0:
+            result = dfs(node)
+            if result is not None:
+                return result
+
+    return None
+
+
 def validate_graph(
     graph: dict[str, set[str]],
     plan_deps: dict[str, list[str]],
     assignment_blocked: dict[str, list[str]],
 ) -> bool:
     """
-    Validate the graph for unknown task IDs.
+    Validate the graph for unknown task IDs and cycles.
 
     Rules:
       - Any dep referenced in 'Depends On' (plan_deps) that is not a known
         task ID causes a fatal error printed to stderr; returns False.
       - Any dep referenced in 'blockedBy' (assignment_blocked) that is not
         a known task ID generates a WARNING (not fatal).
+      - A cycle in the dependency graph is a fatal error; returns False.
 
     Returns True if no fatal errors were found, False otherwise.
     """
@@ -268,6 +314,13 @@ def validate_graph(
                     " -- treating as external block",
                     file=sys.stderr,
                 )
+
+    # Check for cycles in the dependency graph
+    cycle = detect_cycle(graph)
+    if cycle is not None:
+        cycle_str = " -> ".join(cycle)
+        print(f"ERROR: Cycle detected: {cycle_str}", file=sys.stderr)
+        valid = False
 
     return valid
 
@@ -300,6 +353,9 @@ def cmd_parse(args: argparse.Namespace) -> int:
     for task_id in sorted(graph.keys()):
         deps_sorted = sorted(graph[task_id])
         print(f"{task_id}: {deps_sorted}")
+
+    if valid:
+        print("Graph is valid.")
 
     return 0 if valid else 1
 
