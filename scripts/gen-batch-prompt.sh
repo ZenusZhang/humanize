@@ -306,6 +306,15 @@ LANES_OUTPUT=$(
             if (lc ~ /^task[0-9a-z._-]+$/) return 1
             return 0
         }
+        # Returns 1 if every non-empty comma-separated token in val looks like a
+        # task ID (or a placeholder like "-").  Handles "task1, task2" correctly.
+        function all_task_ids(val,    parts, n, i) {
+            n = split(val, parts, /[,[:space:]]+/)
+            for (i = 1; i <= n; i++) {
+                if (parts[i] != "" && !is_task_id(parts[i])) return 0
+            }
+            return 1
+        }
 
         BEGIN {
             # Build a lookup set from the space-separated ready_ids string.
@@ -427,7 +436,7 @@ LANES_OUTPUT=$(
             # --strict-blockedby: detect external (non-task-ID) blockers and emit
             # errors to stderr. Also track strict-blocked status for annotation.
             is_strict_blocked = 0
-            if (strict_blockedby && !is_task_id(blocked)) {
+            if (strict_blockedby && !all_task_ids(blocked)) {
                 print "ERROR: task '" task_id "' blocked by external constraint '" blocked "' (strict mode; resolve before dispatching)" > "/dev/stderr"
                 is_strict_blocked = 1
             }

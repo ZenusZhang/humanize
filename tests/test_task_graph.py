@@ -726,3 +726,57 @@ class TestValidateTransition:
     def test_pending_to_done_is_false(self):
         # pending cannot skip directly to done
         assert task_graph.validate_transition("pending", "done") is False
+
+
+# ===========================================================================
+# 13. Regression tests for code-review fixes (Round 5)
+# ===========================================================================
+
+
+class TestSplitCellsTrailingPipe:
+    """Regression tests for _split_cells() when trailing '|' is absent."""
+
+    def test_row_with_trailing_pipe(self):
+        # Standard row: | task1 | - |
+        assert task_graph._split_cells("| task1 | - |") == ["task1", "-"]
+
+    def test_row_without_trailing_pipe(self):
+        # Valid Markdown row without trailing pipe: | task1 | -
+        # Before fix: parts[1:-1] would drop the last cell.
+        assert task_graph._split_cells("| task1 | -") == ["task1", "-"]
+
+    def test_row_without_leading_or_trailing_pipe(self):
+        # Row without any surrounding pipes: task1 | -
+        assert task_graph._split_cells("task1 | -") == ["task1", "-"]
+
+    def test_parse_plan_file_row_without_trailing_pipe(self, tmp_path):
+        """parse_plan_file must parse rows that lack a trailing '|'."""
+        plan = tmp_path / "plan.md"
+        # Write table manually without trailing pipes on data rows
+        plan.write_text(
+            "| Task ID | Depends On |\n"
+            "|---------|------------|\n"
+            "| task1 | -\n"
+            "| task2 | task1\n",
+            encoding="utf-8",
+        )
+        result = task_graph.parse_plan_file(str(plan))
+        assert "task1" in result
+        assert result["task1"] == []
+        assert "task2" in result
+        assert result["task2"] == ["task1"]
+
+
+class TestDetectCycleOptionalReturn:
+    """Smoke test: detect_cycle returns None (not error) on valid DAG after Optional annotation fix."""
+
+    def test_no_cycle_returns_none(self):
+        graph = {"task1": set(), "task2": {"task1"}, "task3": {"task2"}}
+        assert task_graph.detect_cycle(graph) is None
+
+    def test_cycle_returns_path(self):
+        graph = {"task1": {"task2"}, "task2": {"task1"}}
+        result = task_graph.detect_cycle(graph)
+        assert result is not None
+        assert len(result) >= 2
+

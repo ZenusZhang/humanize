@@ -20,6 +20,7 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+from typing import Optional
 
 
 # ---------------------------------------------------------------------------
@@ -28,10 +29,18 @@ from datetime import datetime, timezone
 
 
 def _split_cells(row: str) -> list[str]:
-    """Split a Markdown table row by '|', strip whitespace from each cell."""
+    """Split a Markdown table row by '|', strip whitespace from each cell.
+
+    Handles both rows with and without a trailing pipe:
+      | task1 | -  |   -> ["task1", "-"]   (trailing pipe present)
+      | task1 | -      -> ["task1", "-"]   (no trailing pipe)
+    """
     parts = row.split("|")
-    # Leading and trailing empty strings from surrounding pipes are discarded
-    return [p.strip() for p in parts[1:-1]] if row.startswith("|") else [p.strip() for p in parts]
+    if row.startswith("|"):
+        parts = parts[1:]  # discard leading empty string from leading '|'
+    if parts and parts[-1].strip() == "":
+        parts = parts[:-1]  # discard trailing empty string only when trailing '|' was present
+    return [p.strip() for p in parts]
 
 
 def _parse_table_header(line: str) -> list[str]:
@@ -234,7 +243,7 @@ def build_graph(
 # ---------------------------------------------------------------------------
 
 
-def detect_cycle(graph: dict[str, set[str]]) -> list[str] | None:
+def detect_cycle(graph: dict[str, set[str]]) -> Optional[list[str]]:
     """
     Perform a DFS-based cycle detection on a directed graph.
 
@@ -250,7 +259,7 @@ def detect_cycle(graph: dict[str, set[str]]) -> list[str] | None:
     # Track the DFS path stack for cycle reconstruction
     path: list[str] = []
 
-    def dfs(node: str) -> list[str] | None:
+    def dfs(node: str) -> Optional[list[str]]:
         color[node] = 1
         path.append(node)
         for neighbor in graph.get(node, set()):
