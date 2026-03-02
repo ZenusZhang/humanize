@@ -12,6 +12,7 @@ Provides subcommands:
   reconcile      -- Reconcile task-state.json with the current plan and assignment
   increment-lane -- Increment the iteration count for a lane; print escalation if cap reached
   reset-lane     -- Reset the iteration count for a lane to 0
+  ready          -- Compute and print the ready set of tasks in topological order
 """
 
 import argparse
@@ -723,6 +724,292 @@ def cmd_reset_lane(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Topological sort
+# ---------------------------------------------------------------------------
+
+
+def topological_sort(graph: dict[str, set[str]]) -> list[str]:
+    """
+    Return a topological ordering of all nodes in graph using Kahn's algorithm.
+
+    graph[task_id] = set of prerequisite task IDs (edges point FROM dependents TO deps).
+    Nodes with equal in-degree are processed in alphabetical order to ensure a
+    deterministic output.
+
+    Raises ValueError if a cycle is detected (defensive; validate_graph should
+    have caught any cycle beforehand).
+    """
+    # Collect all nodes (including dep nodes that might not be top-level keys)
+    all_nodes: set[str] = set(graph.keys())
+    for deps in graph.values():
+        all_nodes.update(deps)
+
+    # Compute in-degree: number of tasks that depend ON each node.
+    # In our graph representation, graph[A] = {B, C} means A depends on B and C,
+    # so there is an edge A -> B and A -> C in the dependency direction.
+    # For topological sort, we want to process nodes with no dependents first
+    # (i.e., nodes that are not depended upon by anyone, or whose deps are done).
+    # Standard topo-sort: in-degree = number of incoming edges.
+    # Edge direction: A depends on B => edge B -> A (B must come before A).
+    # So in-degree[A] = number of tasks that have A as a dependency.
+    in_degree: dict[str, int] = {node: 0 for node in all_nodes}
+    # Build reverse adjacency: for each dep B in graph[A], B -> A
+    reverse_adj: dict[str, list[str]] = {node: [] for node in all_nodes}
+    for task_id in sorted(graph.keys()):
+        for dep in graph[task_id]:
+            if dep in all_nodes:
+                in_degree[task_id] += 1
+                reverse_adj[dep].append(task_id)
+
+    # Initialize queue with nodes that have in-degree 0 (no unresolved deps)
+    # sorted alphabetically for deterministic tie-breaking
+    queue: list[str] = sorted(node for node in all_nodes if in_degree[node] == 0)
+
+    result: list[str] = []
+    while queue:
+        # Pop first node (smallest alphabetically among zero-in-degree nodes)
+        node = queue.pop(0)
+        result.append(node)
+        # Reduce in-degree of dependents; add newly zero-in-degree nodes
+        new_ready: list[str] = []
+        for dependent in reverse_adj[node]:
+            in_degree[dependent] -= 1
+            if in_degree[dependent] == 0:
+                new_ready.append(dependent)
+        # Insert new ready nodes in sorted position to maintain alphabetic order
+        new_ready.sort()
+        # Merge into queue keeping sort order
+        merged: list[str] = []
+        qi = 0
+        ni = 0
+        while qi < len(queue) and ni < len(new_ready):
+            if queue[qi] <= new_ready[ni]:
+                merged.append(queue[qi])
+                qi += 1
+            else:
+                merged.append(new_ready[ni])
+                ni += 1
+        merged.extend(queue[qi:])
+        merged.extend(new_ready[ni:])
+        queue = merged
+
+    if len(result) != len(all_nodes):
+        remaining = sorted(all_nodes - set(result))
+        raise ValueError(
+            f"Cycle detected during topological sort; could not process: {remaining}"
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Ready-set computation
+# ---------------------------------------------------------------------------
+
+
+def compute_ready_set(
+    graph: dict[str, set[str]],
+    state: dict,
+    assignment_blocked: dict[str, list[str]],
+    default_lane_max: int = 5,
+) -> list[str]:
+    """
+    Compute and return the list of task IDs that are currently READY.
+
+    A task is READY iff ALL of the following hold:
+      1. Its status in state["tasks"] is "pending" or "ready" (not in_progress,
+         done, failed, or deferred).  If the task is unknown in state but present
+         in graph, it is treated as "pending".
+      2. All of its dependencies (graph[task_id]) have status "done" in state.
+      3. The task's assigned lane (from state["lane_iterations"]) is NOT at cap.
+      4. The task has no non-task-ID blockedBy values in assignment_blocked
+         (external constraints block the task).
+
+    For tasks blocked by external (non-task-ID) blockedBy values a WARNING is
+    printed to stderr.
+
+    If state is empty (e.g., no task-state.json exists), ALL tasks in graph are
+    treated as ready (backward-compatible behavior).
+
+    Returns the ready task IDs in topological order with alphabetic tie-breaking.
+    The result is stable: identical inputs always produce identical outputs.
+    """
+    known_tasks: set[str] = set(graph.keys())
+
+    # Build set of task IDs from plan (used to distinguish task-ID blockedBy from external)
+    all_task_ids: set[str] = set(graph.keys())
+    for deps in graph.values():
+        all_task_ids.update(deps)
+
+    # Identify which tasks have external (non-task-ID) blockers
+    external_blocked: dict[str, list[str]] = {}
+    for task_id, blocked_list in assignment_blocked.items():
+        ext = [b for b in blocked_list if b not in all_task_ids]
+        if ext:
+            external_blocked[task_id] = ext
+
+    # Backward compat: if state is empty, return all tasks in topological order
+    if not state:
+        topo = topological_sort(graph)
+        return [t for t in topo if t in known_tasks]
+
+    tasks_state: dict[str, dict] = state.get("tasks", {})
+
+    def get_status(task_id: str) -> str:
+        return tasks_state.get(task_id, {}).get("status", "pending")
+
+    # Find the lane for each task by scanning lane_iterations tasks lists
+    task_to_lane: dict[str, str] = {}
+    lane_iterations: dict = state.get("lane_iterations", {})
+    for lane_name, lane_info in lane_iterations.items():
+        for tid in lane_info.get("tasks", []):
+            task_to_lane[tid] = lane_name
+
+    ready_ids: list[str] = []
+
+    topo = topological_sort(graph)
+    for task_id in topo:
+        if task_id not in known_tasks:
+            continue
+
+        status = get_status(task_id)
+
+        # Condition 1: status must be pending or ready
+        if status not in ("pending", "ready"):
+            continue
+
+        # Condition 2: all deps must be done
+        deps_done = all(get_status(dep) == "done" for dep in graph[task_id])
+        if not deps_done:
+            continue
+
+        # Condition 3: assigned lane must not be at cap
+        lane = task_to_lane.get(task_id)
+        if lane is not None and is_lane_at_cap(state, lane, default_lane_max):
+            continue
+
+        # Condition 4: no external blockers
+        if task_id in external_blocked:
+            for blocker in external_blocked[task_id]:
+                print(
+                    f"WARNING: task '{task_id}' is blocked by external constraint: '{blocker}'",
+                    file=sys.stderr,
+                )
+            continue
+
+        ready_ids.append(task_id)
+
+    return ready_ids
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: ready
+# ---------------------------------------------------------------------------
+
+
+def cmd_ready(args: argparse.Namespace) -> int:
+    """
+    Compute and print the set of ready tasks.
+
+    Parses the plan and optional assignment file, reads the state (if present),
+    computes the ready set, and prints one task ID per line to stdout.
+
+    If --show-blocked is given, also prints blocked tasks with annotation
+    BLOCKED: task_id (reason: X).
+
+    Exit code: 0 on success, 1 on validation error (cycle, unknown dep).
+    """
+    plan_deps = parse_plan_file(args.plan)
+
+    assignment_blocked: dict[str, list[str]] = {}
+    if args.assignment:
+        if not os.path.isfile(args.assignment):
+            print(
+                f"ERROR: Assignment file not found: {args.assignment}",
+                file=sys.stderr,
+            )
+            return 1
+        assignment_blocked = parse_assignment_file(args.assignment)
+
+    graph = build_graph(plan_deps, assignment_blocked)
+    valid = validate_graph(graph, plan_deps, assignment_blocked)
+    if not valid:
+        return 1
+
+    default_lane_max: int = args.lane_max if args.lane_max is not None else 5
+
+    # read_state returns {} if file does not exist
+    state = read_state(args.state)
+
+    ready_ids = compute_ready_set(graph, state, assignment_blocked, default_lane_max)
+
+    for task_id in ready_ids:
+        print(task_id)
+
+    if args.show_blocked:
+        ready_set = set(ready_ids)
+        all_task_ids: set[str] = set(graph.keys())
+        for dep_set in graph.values():
+            all_task_ids.update(dep_set)
+
+        topo = topological_sort(graph)
+        tasks_state: dict[str, dict] = state.get("tasks", {}) if state else {}
+
+        def get_status(task_id: str) -> str:
+            return tasks_state.get(task_id, {}).get("status", "pending")
+
+        # Find lane for each task
+        task_to_lane: dict[str, str] = {}
+        lane_iterations: dict = state.get("lane_iterations", {}) if state else {}
+        for lane_name, lane_info in lane_iterations.items():
+            for tid in lane_info.get("tasks", []):
+                task_to_lane[tid] = lane_name
+
+        # External blockers per task
+        external_blocked: dict[str, list[str]] = {}
+        for task_id, blocked_list in assignment_blocked.items():
+            ext = [b for b in blocked_list if b not in all_task_ids]
+            if ext:
+                external_blocked[task_id] = ext
+
+        for task_id in topo:
+            if task_id not in graph:
+                continue
+            if task_id in ready_set:
+                continue
+
+            status = get_status(task_id)
+            if status in ("done", "deferred"):
+                continue
+
+            # Determine reason
+            reasons: list[str] = []
+
+            if status in ("in_progress", "failed"):
+                reasons.append(f"status={status}")
+            elif status in ("pending", "ready"):
+                # Check why it's not ready
+                unmet_deps = [
+                    dep for dep in graph[task_id] if get_status(dep) != "done"
+                ]
+                if unmet_deps:
+                    reasons.append(f"waiting on deps: {', '.join(sorted(unmet_deps))}")
+
+                lane = task_to_lane.get(task_id)
+                if lane is not None and is_lane_at_cap(state, lane, default_lane_max):
+                    reasons.append(f"lane '{lane}' at cap")
+
+                if task_id in external_blocked:
+                    for blocker in external_blocked[task_id]:
+                        reasons.append(f"external block: {blocker}")
+
+            reason_str = "; ".join(reasons) if reasons else "unknown"
+            print(f"BLOCKED: {task_id} (reason: {reason_str})")
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Self-verification (invoked when --verify flag is passed to the script)
 # ---------------------------------------------------------------------------
 
@@ -1047,6 +1334,217 @@ def _run_verification() -> None:
     )
 
     # ------------------------------------------------------------------
+    # Test 12: topological_sort on simple linear DAG task1->task2->task3
+    # ------------------------------------------------------------------
+    linear_graph: dict[str, set[str]] = {
+        "task1": set(),
+        "task2": {"task1"},
+        "task3": {"task2"},
+    }
+    topo_result = topological_sort(linear_graph)
+    check(
+        "topological_sort linear: task1 before task2",
+        topo_result.index("task1") < topo_result.index("task2"),
+    )
+    check(
+        "topological_sort linear: task2 before task3",
+        topo_result.index("task2") < topo_result.index("task3"),
+    )
+    check(
+        "topological_sort linear: all 3 tasks present",
+        set(topo_result) == {"task1", "task2", "task3"},
+    )
+
+    # ------------------------------------------------------------------
+    # Test 13: topological_sort alphabetic tie-breaking
+    # ------------------------------------------------------------------
+    diamond_graph: dict[str, set[str]] = {
+        "root": set(),
+        "b_task": {"root"},
+        "a_task": {"root"},
+        "leaf": {"a_task", "b_task"},
+    }
+    topo_diamond = topological_sort(diamond_graph)
+    check(
+        "topological_sort diamond: root is first",
+        topo_diamond[0] == "root",
+    )
+    check(
+        "topological_sort diamond: a_task before b_task (alphabetic)",
+        topo_diamond.index("a_task") < topo_diamond.index("b_task"),
+    )
+    check(
+        "topological_sort diamond: leaf is last",
+        topo_diamond[-1] == "leaf",
+    )
+
+    # ------------------------------------------------------------------
+    # Test 14: topological_sort raises ValueError on cycle
+    # ------------------------------------------------------------------
+    cycle_graph: dict[str, set[str]] = {
+        "A": {"B"},
+        "B": {"A"},
+    }
+    try:
+        topological_sort(cycle_graph)
+        check("topological_sort raises ValueError on cycle", False)
+    except ValueError:
+        check("topological_sort raises ValueError on cycle", True)
+
+    # ------------------------------------------------------------------
+    # Test 15: compute_ready_set -- simple DAG, task1=done -> task2 ready, task3 not
+    # ------------------------------------------------------------------
+    simple_graph: dict[str, set[str]] = {
+        "task1": set(),
+        "task2": {"task1"},
+        "task3": {"task2"},
+    }
+    simple_state: dict = {
+        "version": 1,
+        "tasks": {
+            "task1": {"status": "done"},
+            "task2": {"status": "pending"},
+            "task3": {"status": "pending"},
+        },
+        "lane_iterations": {},
+    }
+    ready = compute_ready_set(simple_graph, simple_state, {})
+    check("test15: task2 is ready (task1=done)", "task2" in ready)
+    check("test15: task3 is NOT ready (task2 not done)", "task3" not in ready)
+    check("test15: task1 is NOT ready (already done)", "task1" not in ready)
+
+    # ------------------------------------------------------------------
+    # Test 16: compute_ready_set -- no state file -> all tasks returned in topo order
+    # ------------------------------------------------------------------
+    ready_no_state = compute_ready_set(simple_graph, {}, {})
+    check("test16: all tasks returned when state is empty", set(ready_no_state) == {"task1", "task2", "task3"})
+    check(
+        "test16: task1 before task2 in topo order",
+        ready_no_state.index("task1") < ready_no_state.index("task2"),
+    )
+    check(
+        "test16: task2 before task3 in topo order",
+        ready_no_state.index("task2") < ready_no_state.index("task3"),
+    )
+
+    # ------------------------------------------------------------------
+    # Test 17: compute_ready_set -- external blockedBy blocks task; WARNING printed
+    # ------------------------------------------------------------------
+    import io
+    from contextlib import redirect_stderr
+
+    ext_graph: dict[str, set[str]] = {
+        "taskA": set(),
+        "taskB": set(),
+    }
+    ext_state: dict = {
+        "version": 1,
+        "tasks": {
+            "taskA": {"status": "pending"},
+            "taskB": {"status": "pending"},
+        },
+        "lane_iterations": {},
+    }
+    ext_assignment: dict[str, list[str]] = {
+        "taskB": ["external-blocker"],
+    }
+    stderr_capture = io.StringIO()
+    with redirect_stderr(stderr_capture):
+        ready_ext = compute_ready_set(ext_graph, ext_state, ext_assignment)
+    stderr_out = stderr_capture.getvalue()
+    check("test17: taskA is ready (no blocker)", "taskA" in ready_ext)
+    check("test17: taskB is NOT ready (external blocker)", "taskB" not in ready_ext)
+    check("test17: WARNING printed for taskB", "WARNING" in stderr_out and "taskB" in stderr_out)
+
+    # ------------------------------------------------------------------
+    # Test 18: compute_ready_set -- lane at cap blocks task
+    # ------------------------------------------------------------------
+    lane_graph: dict[str, set[str]] = {
+        "taskX": set(),
+        "taskY": set(),
+    }
+    lane_state: dict = {
+        "version": 1,
+        "tasks": {
+            "taskX": {"status": "pending"},
+            "taskY": {"status": "pending"},
+        },
+        "lane_iterations": {
+            "lane-A": {"count": 5, "max": 5, "tasks": ["taskX"]},
+        },
+    }
+    ready_lane = compute_ready_set(lane_graph, lane_state, {})
+    check("test18: taskY is ready (no lane cap)", "taskY" in ready_lane)
+    check("test18: taskX is NOT ready (lane-A at cap)", "taskX" not in ready_lane)
+
+    # ------------------------------------------------------------------
+    # Test 19: compute_ready_set determinism (same input -> same output)
+    # ------------------------------------------------------------------
+    det_graph: dict[str, set[str]] = {
+        "t1": set(),
+        "t2": set(),
+        "t3": {"t1", "t2"},
+    }
+    det_state: dict = {
+        "version": 1,
+        "tasks": {
+            "t1": {"status": "done"},
+            "t2": {"status": "done"},
+            "t3": {"status": "pending"},
+        },
+        "lane_iterations": {},
+    }
+    result_a = compute_ready_set(det_graph, det_state, {})
+    result_b = compute_ready_set(det_graph, det_state, {})
+    check("test19: determinism: same output on second call", result_a == result_b)
+
+    # ------------------------------------------------------------------
+    # Test 20: cmd_ready --show-blocked prints BLOCKED annotation
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        plan_path = os.path.join(tmpdir, "plan.md")
+        plan_content = (
+            "| Task ID | Depends On |\n"
+            "|---------|------------|\n"
+            "| task1   | -          |\n"
+            "| task2   | task1      |\n"
+            "| task3   | task2      |\n"
+        )
+        with open(plan_path, "w", encoding="utf-8") as pf:
+            pf.write(plan_content)
+
+        state_path = os.path.join(tmpdir, "task-state.json")
+        sb_state = {
+            "version": 1,
+            "tasks": {
+                "task1": {"status": "done"},
+                "task2": {"status": "pending"},
+                "task3": {"status": "pending"},
+            },
+            "lane_iterations": {},
+        }
+        write_state(sb_state, state_path)
+
+        class _Args:
+            pass
+
+        sb_args = _Args()
+        sb_args.plan = plan_path  # type: ignore[attr-defined]
+        sb_args.state = state_path  # type: ignore[attr-defined]
+        sb_args.assignment = None  # type: ignore[attr-defined]
+        sb_args.lane_max = None  # type: ignore[attr-defined]
+        sb_args.show_blocked = True  # type: ignore[attr-defined]
+
+        captured_sb = io.StringIO()
+        with redirect_stdout(captured_sb):
+            ret_sb = cmd_ready(sb_args)
+        out_sb = captured_sb.getvalue()
+
+        check("test20: cmd_ready returns 0", ret_sb == 0)
+        check("test20: task2 printed as ready", "task2" in out_sb)
+        check("test20: BLOCKED annotation for task3", "BLOCKED: task3" in out_sb)
+
+    # ------------------------------------------------------------------
     # Report
     # ------------------------------------------------------------------
     if failures:
@@ -1151,6 +1649,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the task-state.json file (default: task-state.json).",
     )
 
+    # -- ready subcommand --
+    ready_parser = subparsers.add_parser(
+        "ready",
+        help="Compute and print the ready set of tasks in topological order.",
+    )
+    ready_parser.add_argument("--plan", required=True, help="Path to the plan Markdown file.")
+    ready_parser.add_argument(
+        "--state",
+        default="task-state.json",
+        help="Path to the task-state.json file (default: task-state.json).",
+    )
+    ready_parser.add_argument(
+        "--assignment",
+        default=None,
+        help="Path to the worktree-assignment.md file (optional).",
+    )
+    ready_parser.add_argument(
+        "--lane-max",
+        type=int,
+        default=None,
+        dest="lane_max",
+        help="Default maximum iterations per lane (default: 5).",
+    )
+    ready_parser.add_argument(
+        "--show-blocked",
+        action="store_true",
+        default=False,
+        dest="show_blocked",
+        help="Also print blocked tasks with BLOCKED: task_id (reason: X) annotations.",
+    )
+
     return parser
 
 
@@ -1168,6 +1697,8 @@ def main() -> int:
         return cmd_increment_lane(args)
     elif args.subcommand == "reset-lane":
         return cmd_reset_lane(args)
+    elif args.subcommand == "ready":
+        return cmd_ready(args)
     else:
         print(f"ERROR: Unknown subcommand '{args.subcommand}'", file=sys.stderr)
         return 1
