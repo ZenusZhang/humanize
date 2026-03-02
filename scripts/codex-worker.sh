@@ -185,10 +185,111 @@ fi
 # Detect Project Root
 # ========================================
 
-if git -C "$WORKDIR" rev-parse --show-toplevel &>/dev/null; then
-    PROJECT_ROOT=$(git -C "$WORKDIR" rev-parse --show-toplevel)
-else
-    PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$WORKDIR}"
+find_humanize_project_root() {
+    local start_dir="$1"
+    local current_dir=""
+
+    if [[ ! -d "$start_dir" ]]; then
+        return 1
+    fi
+
+    current_dir="$(cd "$start_dir" && pwd)"
+    while true; do
+        if [[ -d "$current_dir/.humanize" ]]; then
+            echo "$current_dir"
+            return 0
+        fi
+        if [[ "$current_dir" == "/" ]]; then
+            break
+        fi
+        current_dir="$(dirname "$current_dir")"
+    done
+
+    return 1
+}
+
+find_active_loop_for_marker() {
+    local project_root="$1"
+    local loop_base="$project_root/.humanize/rlcr"
+    local loop_dir=""
+    local candidate=""
+
+    if [[ -n "${LOOP_DIR_ENV:-}" ]]; then
+        loop_dir="$LOOP_DIR_ENV"
+        if [[ -f "$loop_dir/state.md" ]] && [[ ! -f "$loop_dir/cancel-state.md" ]] && [[ ! -f "$loop_dir/finalize-state.md" ]]; then
+            echo "$loop_dir"
+        fi
+        return 0
+    fi
+
+    if [[ ! -d "$loop_base" ]]; then
+        return 0
+    fi
+
+    while IFS= read -r candidate; do
+        if [[ -f "$candidate/state.md" ]] && [[ ! -f "$candidate/cancel-state.md" ]] && [[ ! -f "$candidate/finalize-state.md" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done < <(find "$loop_base" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -r)
+
+    return 0
+}
+
+extract_state_current_round() {
+    local state_file="$1"
+    local frontmatter=""
+    local current_round=""
+
+    if [[ ! -f "$state_file" ]]; then
+        return 0
+    fi
+
+    frontmatter=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$state_file" 2>/dev/null || true)
+    current_round=$(echo "$frontmatter" | sed -n 's/^current_round:[[:space:]]*//p' | head -1 | tr -d ' "')
+
+    if [[ "$current_round" =~ ^[0-9]+$ ]]; then
+        echo "$current_round"
+    fi
+    return 0
+}
+
+write_worker_invocation_marker() {
+    local project_root="$1"
+    local loop_dir=""
+    local current_round=""
+    local marker_file=""
+
+    loop_dir="$(find_active_loop_for_marker "$project_root")"
+    if [[ -z "$loop_dir" ]]; then
+        return 0
+    fi
+
+    current_round="$(extract_state_current_round "$loop_dir/state.md")"
+    if [[ -z "$current_round" ]]; then
+        return 0
+    fi
+
+    marker_file="$loop_dir/.worker-invoked-round-$current_round"
+    if ! date -u +%Y-%m-%dT%H:%M:%SZ > "$marker_file" 2>/dev/null; then
+        : > "$marker_file" 2>/dev/null || true
+    fi
+
+    return 0
+}
+
+WORKDIR_ABS="$WORKDIR"
+if [[ -d "$WORKDIR" ]]; then
+    WORKDIR_ABS="$(cd "$WORKDIR" && pwd)"
+fi
+
+PROJECT_ROOT="$(find_humanize_project_root "$WORKDIR_ABS" || true)"
+if [[ -z "$PROJECT_ROOT" ]]; then
+    if git -C "$WORKDIR" rev-parse --show-toplevel &>/dev/null; then
+        PROJECT_ROOT=$(git -C "$WORKDIR" rev-parse --show-toplevel)
+    else
+        PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$WORKDIR_ABS}"
+    fi
 fi
 
 # ========================================
@@ -358,6 +459,8 @@ EOF
     exit "$CODEX_EXIT_CODE"
 fi
 
+write_worker_invocation_marker "$PROJECT_ROOT"
+
 if [[ ! -s "$CODEX_STDOUT_FILE" ]]; then
     echo "Error: Codex worker returned empty response" >&2
     if [[ -s "$CODEX_STDERR_FILE" ]]; then
@@ -407,4 +510,3 @@ echo "codex-worker: response saved to $SKILL_DIR/output.md" >&2
 # ========================================
 
 cat "$CODEX_STDOUT_FILE"
-

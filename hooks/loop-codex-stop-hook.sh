@@ -2096,6 +2096,18 @@ WORKTREE_TEAMS_FALLBACK_EOF
     fi
 fi
 
+if [[ "$WORKTREE_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]] && [[ "$CURRENT_ROUND" =~ ^[0-9]+$ ]] && [[ "$CURRENT_ROUND" -ge 1 ]]; then
+    WORKER_MARKER_FILE="$LOOP_DIR/.worker-invoked-round-${CURRENT_ROUND}"
+    if [[ ! -f "$WORKER_MARKER_FILE" ]]; then
+        cat >> "$NEXT_PROMPT_FILE" << EOF
+
+> WARNING: No codex-worker invocation was detected in round ${CURRENT_ROUND}. If coding tasks were assigned,
+> they must be delegated to /humanize:codex-worker. Direct self-implementation violates the
+> team-leader protocol.
+EOF
+    fi
+fi
+
 append_task_tag_routing_note "$NEXT_PROMPT_FILE"
 
 # Build system message
