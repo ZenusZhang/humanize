@@ -21,6 +21,7 @@ source "$HOOKS_LIB_DIR/loop-common.sh"
 
 PROJECT_ROOT=""
 LOOP_DIR=""
+INCLUDE_BLOCKED=0
 
 show_help() {
     cat << 'HELP_EOF'
@@ -32,9 +33,14 @@ USAGE:
 OPTIONS:
   --loop-dir <PATH>       Explicit RLCR loop directory (defaults to active loop)
   --project-root <PATH>   Project root (defaults to git root of CWD)
+  --include-blocked       Include ALL Parallelizable=yes tasks; annotate blocked tasks
+                          with "[BLOCKED: check task-state.json]". Skips readiness check.
   -h, --help              Show this help message
 
 NOTES:
+  - By default, only tasks in the ready set (from task-graph.py ready) are included.
+  - If task-state.json does not exist, all Parallelizable=yes tasks are included (backward compat).
+  - If task-graph.py is unavailable, readiness filtering is skipped with a warning.
   - Tasks are selected from the "Parallelization Matrix" where
     Parallelizable (yes/no) == "yes" (case-insensitive).
   - If no tasks are marked as parallelizable, the script prints a reminder
@@ -63,6 +69,10 @@ while [[ $# -gt 0 ]]; do
             fi
             PROJECT_ROOT="$2"
             shift 2
+            ;;
+        --include-blocked)
+            INCLUDE_BLOCKED=1
+            shift
             ;;
         *)
             echo "Error: Unknown option: $1" >&2
@@ -122,6 +132,60 @@ if [[ ! -f "$PLAN_FILE" ]]; then
     PLAN_FILE="/dev/null"
 fi
 
+# ---------------------------------------------------------------------------
+# Readiness filtering
+# ---------------------------------------------------------------------------
+# READY_TASK_IDS: space-separated list of ready task IDs, or empty string to
+# mean "no filtering" (include all Parallelizable=yes tasks).
+# BLOCKED_ANNOTATION_ACTIVE: set to 1 if --include-blocked was given.
+READY_TASK_IDS=""
+BLOCKED_ANNOTATION_ACTIVE=0
+TASK_STATE_FILE="$LOOP_DIR/task-state.json"
+TASK_GRAPH_SCRIPT="$SCRIPT_DIR/task-graph.py"
+
+if [[ "$INCLUDE_BLOCKED" -eq 1 ]]; then
+    # --include-blocked: include all tasks; use ready set only for annotation.
+    echo "WARNING: --include-blocked is active; output may include non-ready tasks" >&2
+    BLOCKED_ANNOTATION_ACTIVE=1
+    # Still attempt to get the ready set so we can annotate non-ready tasks.
+    if [[ -f "$TASK_STATE_FILE" ]]; then
+        if ! python3 "$TASK_GRAPH_SCRIPT" --help >/dev/null 2>&1; then
+            echo "WARNING: task-graph.py not available; blocked annotations will not be applied" >&2
+        else
+            READY_CMD_ARGS=(ready --plan "$PLAN_FILE" --state "$TASK_STATE_FILE")
+            if [[ -f "$ASSIGNMENT_FILE" ]]; then
+                READY_CMD_ARGS+=(--assignment "$ASSIGNMENT_FILE")
+            fi
+            if READY_OUTPUT=$(python3 "$TASK_GRAPH_SCRIPT" "${READY_CMD_ARGS[@]}" 2>/dev/null); then
+                READY_TASK_IDS=$(printf '%s' "$READY_OUTPUT" | tr '\n' ' ')
+            else
+                echo "WARNING: task-graph.py ready failed; blocked annotations will not be applied" >&2
+            fi
+        fi
+    fi
+elif [[ ! -f "$TASK_STATE_FILE" ]]; then
+    # No state file: backward-compatible, include all tasks without filtering
+    : # do nothing; READY_TASK_IDS stays empty
+else
+    # State file exists: attempt readiness check via task-graph.py
+    if ! python3 "$TASK_GRAPH_SCRIPT" --help >/dev/null 2>&1; then
+        echo "WARNING: task-graph.py not available; skipping readiness check" >&2
+    else
+        # Build the ready subcommand arguments
+        READY_CMD_ARGS=(ready --plan "$PLAN_FILE" --state "$TASK_STATE_FILE")
+        if [[ -f "$ASSIGNMENT_FILE" ]]; then
+            READY_CMD_ARGS+=(--assignment "$ASSIGNMENT_FILE")
+        fi
+        # Run task-graph.py ready; on error, warn and fall back to all tasks
+        if READY_OUTPUT=$(python3 "$TASK_GRAPH_SCRIPT" "${READY_CMD_ARGS[@]}" 2>/dev/null); then
+            # Build a space-separated list of ready task IDs (one per line from output)
+            READY_TASK_IDS=$(printf '%s' "$READY_OUTPUT" | tr '\n' ' ')
+        else
+            echo "WARNING: task-graph.py ready failed; skipping readiness check" >&2
+        fi
+    fi
+fi
+
 cat << 'HEADER_EOF'
 # `/batch` Parallel Dispatch (Humanize) / `/batch` 并行分发（Humanize）
 
@@ -150,7 +214,10 @@ printf -- '- Plan: `%s`\n' "$PLAN_FILE"
 printf -- '- Assignment: `%s`\n' "$ASSIGNMENT_FILE"
 
 LANES_OUTPUT=$(
-    awk '
+    awk \
+        -v ready_ids="$READY_TASK_IDS" \
+        -v blocked_annotation="$BLOCKED_ANNOTATION_ACTIVE" \
+        '
         function trim(text) {
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
             return text
@@ -185,6 +252,18 @@ LANES_OUTPUT=$(
         }
 
         BEGIN {
+            # Build a lookup set from the space-separated ready_ids string.
+            # If ready_ids is empty, use_ready_filter is 0 (no filtering).
+            use_ready_filter = 0
+            if (ready_ids != "") {
+                use_ready_filter = 1
+                n_ready = split(ready_ids, ready_arr, " ")
+                for (ri = 1; ri <= n_ready; ri++) {
+                    tid = ready_arr[ri]
+                    if (tid != "") ready_set[tid] = 1
+                }
+            }
+
             # plan mapping
             plan_task_col = 0
             plan_desc_col = 0
@@ -267,6 +346,17 @@ LANES_OUTPUT=$(
             parallel = tolower(trim(cells_raw[mat_parallel_col]))
             if (parallel != "yes") next
 
+            # Readiness filter: when use_ready_filter is active and task is not ready,
+            # either skip it (default) or annotate it (--include-blocked mode).
+            is_blocked_task = 0
+            if (use_ready_filter && !(task_id in ready_set)) {
+                if (blocked_annotation) {
+                    is_blocked_task = 1
+                } else {
+                    next
+                }
+            }
+
             worker = (mat_worker_col > 0 && mat_worker_col <= cell_count) ? strip_ticks(cells_raw[mat_worker_col]) : ""
             reviewer = (mat_reviewer_col > 0 && mat_reviewer_col <= cell_count) ? strip_ticks(cells_raw[mat_reviewer_col]) : ""
             worktree = (mat_worktree_col > 0 && mat_worktree_col <= cell_count) ? strip_ticks(cells_raw[mat_worktree_col]) : ""
@@ -289,7 +379,11 @@ LANES_OUTPUT=$(
             desc = (task_id in plan_desc) ? plan_desc[task_id] : "[missing description in plan]"
 
             task_total++
-            tasks[worker] = tasks[worker] sprintf("- %s: %s (blockedBy: %s; ownership: %s)\n", task_id, desc, blocked, ownership)
+            if (is_blocked_task) {
+                tasks[worker] = tasks[worker] sprintf("- %s: %s (blockedBy: %s; ownership: %s) [BLOCKED: check task-state.json]\n", task_id, desc, blocked, ownership)
+            } else {
+                tasks[worker] = tasks[worker] sprintf("- %s: %s (blockedBy: %s; ownership: %s)\n", task_id, desc, blocked, ownership)
+            }
         }
 
         END {
