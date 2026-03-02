@@ -40,6 +40,7 @@ readonly FIELD_SESSION_ID="session_id"
 readonly FIELD_AGENT_TEAMS="agent_teams"
 readonly FIELD_WORKTREE_TEAMS="worktree_teams"
 readonly FIELD_WORKTREE_ROOT="worktree_root"
+readonly FIELD_DELEGATION_ENFORCEMENT="delegation_enforcement"
 
 # Default Codex configuration (single source of truth - all scripts reference this)
 # Both use :- so scripts can override before sourcing when needed.
@@ -340,6 +341,7 @@ _parse_state_fields() {
     STATE_AGENT_TEAMS=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_AGENT_TEAMS}:" | sed "s/${FIELD_AGENT_TEAMS}: *//" | tr -d ' ' || true)
     STATE_WORKTREE_TEAMS=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_WORKTREE_TEAMS}:" | sed "s/${FIELD_WORKTREE_TEAMS}: *//" | tr -d ' ' || true)
     STATE_WORKTREE_ROOT=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_WORKTREE_ROOT}:" | sed "s/${FIELD_WORKTREE_ROOT}: *//" | sed 's/^"//; s/"$//' || true)
+    STATE_DELEGATION_ENFORCEMENT=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_DELEGATION_ENFORCEMENT}:" | sed "s/${FIELD_DELEGATION_ENFORCEMENT}: *//" | tr -d ' ' || true)
 }
 
 # Parse state file frontmatter and set variables (tolerant mode with defaults)
@@ -362,6 +364,7 @@ _parse_state_fields() {
 #   STATE_AGENT_TEAMS - "true" or "false"
 #   STATE_WORKTREE_TEAMS - "true" or "false"
 #   STATE_WORKTREE_ROOT - worktree root path when worktree teams are enabled
+#   STATE_DELEGATION_ENFORCEMENT - "warn" or "strict"
 # Returns: 0 on success, 1 if file not found
 # Note: For strict validation, use parse_state_file_strict() instead
 parse_state_file() {
@@ -386,6 +389,7 @@ parse_state_file() {
     STATE_AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
     STATE_WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
     STATE_WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
+    STATE_DELEGATION_ENFORCEMENT="${STATE_DELEGATION_ENFORCEMENT:-warn}"
     # STATE_REVIEW_STARTED left as-is (empty if missing, to allow schema validation)
 
     return 0
@@ -463,6 +467,7 @@ parse_state_file_strict() {
     STATE_AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
     STATE_WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
     STATE_WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
+    STATE_DELEGATION_ENFORCEMENT="${STATE_DELEGATION_ENFORCEMENT:-warn}"
 
     return 0
 }

@@ -143,6 +143,7 @@ if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
         WORKTREE_ROOT_SAFE=""
     fi
 fi
+DELEGATION_ENFORCEMENT="${STATE_DELEGATION_ENFORCEMENT:-warn}"
 BITLESSON_REQUIRED="false"
 if [[ -n "$RAW_BITLESSON_REQUIRED" ]]; then
     BITLESSON_REQUIRED=$(echo "$RAW_BITLESSON_REQUIRED" | sed 's/^bitlesson_required:[[:space:]]*//' | tr -d ' "')
@@ -170,6 +171,10 @@ if [[ "${HUMANIZE_ALLOW_EMPTY_BITLESSON_NONE:-}" == "true" ]]; then
 fi
 if [[ "$BITLESSON_ALLOW_EMPTY_NONE" != "true" && "$BITLESSON_ALLOW_EMPTY_NONE" != "false" ]]; then
     BITLESSON_ALLOW_EMPTY_NONE="true"
+fi
+if [[ "$DELEGATION_ENFORCEMENT" != "warn" && "$DELEGATION_ENFORCEMENT" != "strict" ]]; then
+    echo "Warning: Invalid delegation_enforcement value '$DELEGATION_ENFORCEMENT' in state file; defaulting to warn" >&2
+    DELEGATION_ENFORCEMENT="warn"
 fi
 # Re-validate Codex Model and Effort for YAML safety (in case state.md was manually edited)
 # Use same validation patterns as setup-rlcr-loop.sh
@@ -1585,6 +1590,48 @@ Follow the plan's per-task routing tags strictly:
 ROUTING_EOF
 }
 
+# Inject delegation enforcement guidance near the top of next-round prompts.
+# Arguments: $1=prompt_file_path
+inject_delegation_enforcement_note() {
+    local prompt_file="$1"
+
+    if [[ "$AGENT_TEAMS" != "true" ]]; then
+        return 0
+    fi
+
+    local enforcement_block=""
+    if [[ "$DELEGATION_ENFORCEMENT" == "strict" ]]; then
+        enforcement_block=$(cat << 'STRICT_ENFORCEMENT_EOF'
+## STRICT MODE: Delegation Enforcement
+**WARNING**: Delegate all coding to `/humanize:codex-worker`.
+If you write implementation code, edit source files, or run commands that modify the codebase directly, this breaks the loop and this round is non-compliant.
+STRICT_ENFORCEMENT_EOF
+)
+    else
+        enforcement_block="**Delegation Warning**: Delegate coding to \`/humanize:codex-worker\`; direct self-implementation can be flagged as non-compliant."
+    fi
+
+    local temp_prompt_file="${prompt_file}.tmp.$$"
+    awk -v enforcement="$enforcement_block" '
+        BEGIN { injected = 0 }
+        !injected && /^## Original Implementation Plan/ {
+            print ""
+            print enforcement
+            print ""
+            injected = 1
+        }
+        { print }
+        END {
+            if (!injected) {
+                print ""
+                print enforcement
+                print ""
+            }
+        }
+    ' "$prompt_file" > "$temp_prompt_file"
+    mv "$temp_prompt_file" "$prompt_file"
+}
+
 # Continue review loop when issues are found
 # Arguments: $1=round_number, $2=review_content
 continue_review_loop_with_issues() {
@@ -2006,6 +2053,8 @@ load_and_render_safe "$TEMPLATE_DIR" "claude/next-round-prompt.md" "$NEXT_ROUND_
     "REVIEW_CONTENT=$REVIEW_CONTENT" \
     "GOAL_TRACKER_FILE=$GOAL_TRACKER_FILE" \
     "BITLESSON_FILE=$BITLESSON_FILE" > "$NEXT_PROMPT_FILE"
+
+inject_delegation_enforcement_note "$NEXT_PROMPT_FILE"
 
 # Check for Open Questions in review content and inject notice if enabled
 # Detection: line containing "Open Question" substring with total length < 40 chars

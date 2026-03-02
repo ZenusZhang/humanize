@@ -54,6 +54,7 @@ AGENT_TEAMS_EXPLICIT="false"
 WORKTREE_TEAMS_EXPLICIT="false"
 WORKTREE_ROOT=""
 BITLESSON_ALLOW_EMPTY_NONE="true"
+DELEGATION_ENFORCEMENT="${HUMANIZE_CODEX_DELEGATION_ENFORCEMENT:-warn}"
 
 show_help() {
     cat << 'HELP_EOF'
@@ -106,6 +107,9 @@ OPTIONS:
   --require-bitlesson-entry-for-none
                        Enforce strict mode: in round > 0, `Action: none` requires at least
                        one concrete lesson entry in `bitlesson.md`
+  HUMANIZE_CODEX_DELEGATION_ENFORCEMENT
+                       Delegation enforcement level for agent-team prompting.
+                       Allowed values: warn, strict (default: warn)
   -h, --help           Show this help message
 
 DESCRIPTION:
@@ -301,6 +305,12 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Validate delegation enforcement level from environment
+if [[ "$DELEGATION_ENFORCEMENT" != "warn" && "$DELEGATION_ENFORCEMENT" != "strict" ]]; then
+    echo "Error: HUMANIZE_CODEX_DELEGATION_ENFORCEMENT must be 'warn' or 'strict', got: $DELEGATION_ENFORCEMENT" >&2
+    exit 1
+fi
 
 # ========================================
 # Validate Prerequisites
@@ -997,6 +1007,7 @@ session_id:
 agent_teams: $AGENT_TEAMS
 worktree_teams: $WORKTREE_TEAMS
 worktree_root: $WORKTREE_ROOT
+delegation_enforcement: $DELEGATION_ENFORCEMENT
 bitlesson_required: true
 bitlesson_file: $BITLESSON_FILE_REL
 bitlesson_allow_empty_none: $BITLESSON_ALLOW_EMPTY_NONE
@@ -1429,6 +1440,7 @@ Base Branch: $BASE_BRANCH
 Codex Model: $CODEX_MODEL
 Codex Effort: $CODEX_EFFORT
 Codex Timeout: ${CODEX_TIMEOUT}s
+Delegation Enforcement: $DELEGATION_ENFORCEMENT
 Loop Directory: $LOOP_DIR
 
 Skip-impl mode is active. The implementation phase is skipped.
@@ -1461,6 +1473,7 @@ Ask User for Codex Questions: $ASK_CODEX_QUESTION
 Agent Teams: $AGENT_TEAMS
 Worktree Teams: $WORKTREE_TEAMS
 Worktree Root: ${WORKTREE_ROOT:-N/A}
+Delegation Enforcement: $DELEGATION_ENFORCEMENT
 Loop Directory: $LOOP_DIR
 
 The loop is now active. When you try to exit:
