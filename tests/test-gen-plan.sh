@@ -158,10 +158,10 @@ else
     fail "gen-plan command includes iterative convergence loop phase" "Phase 5 convergence loop section" "missing"
 fi
 
-if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "Maximum 5 rounds reached" "$GEN_PLAN_CMD"; then
+if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "Maximum 3 rounds reached" "$GEN_PLAN_CMD"; then
     pass "gen-plan command defines convergence loop termination limit"
 else
-    fail "gen-plan command defines convergence loop termination limit" "Maximum 5 rounds reached" "missing"
+    fail "gen-plan command defines convergence loop termination limit" "Maximum 3 rounds reached" "missing"
 fi
 
 if [[ -f "$GEN_PLAN_CMD" ]]; then

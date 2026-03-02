@@ -213,7 +213,7 @@ After Claude candidate plan v1 is ready, run iterative challenge/refine rounds w
 Repeat convergence rounds until one of the following is true:
 - No `REQUIRED_CHANGES` remain and no high-impact `DISAGREE` remains
 - Two consecutive rounds produce no material plan changes
-- Maximum 5 rounds reached
+- Maximum 3 rounds reached
 
 If max rounds are reached with unresolved opposite opinions, carry them to user decision phase explicitly.
 
