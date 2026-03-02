@@ -159,11 +159,19 @@ def parse_assignment_file(path: str) -> dict[str, list[str]]:
 
     Returns a dict mapping each task ID to its list of declared blockedBy values.
     Returns an empty dict if no matching section or table is found.
+
+    Raises SystemExit with a clear error message if the file exists but is
+    unreadable or has an unexpected encoding, so callers always get a
+    predictable failure rather than a raw Python stack trace.
     """
     blocked_by: dict[str, list[str]] = {}
 
-    with open(path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError as exc:
+        print(f"ERROR: assignment file not readable: '{path}': {exc}", file=sys.stderr)
+        sys.exit(1)
 
     # Find the "Parallelization Matrix" section
     in_section = False
