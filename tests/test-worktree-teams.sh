@@ -20,6 +20,7 @@ echo ""
 SETUP_SCRIPT="$SCRIPT_DIR/../scripts/setup-rlcr-loop.sh"
 WORKTREE_SETUP_SCRIPT="$SCRIPT_DIR/../scripts/setup-worktree-teams.sh"
 STOP_HOOK="$SCRIPT_DIR/../hooks/loop-codex-stop-hook.sh"
+CODEX_WORKER_SCRIPT="$SCRIPT_DIR/../scripts/codex-worker.sh"
 
 create_gitignored_plan_repo() {
     local repo_dir="$1"
@@ -618,6 +619,11 @@ if [[ -f "$NEXT_PROMPT" ]]; then
     else
         fail "implementation-phase prompt still includes review feedback section" "review feedback section marker" "not found"
     fi
+    if grep -Fq "No codex-worker invocation was detected in round 3" "$NEXT_PROMPT"; then
+        pass "stop hook appends missing worker marker warning when round marker is absent"
+    else
+        fail "stop hook appends missing worker marker warning when round marker is absent" "missing worker marker warning in prompt" "not found"
+    fi
 else
     fail "round-4 prompt exists after stop hook in worktree mode" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
 fi
@@ -632,6 +638,28 @@ if [[ -f "$NEXT_SUMMARY" ]] && grep -q "^## BitLesson Delta" "$NEXT_SUMMARY"; th
     pass "next-round summary template includes BitLesson Delta section"
 else
     fail "next-round summary template includes BitLesson Delta section" "BitLesson Delta section" "$(cat "$NEXT_SUMMARY" 2>/dev/null || echo 'missing')"
+fi
+
+# Verify worker invocation marker suppresses stop-hook warning
+setup_stophook_test
+touch "$LOOP_DIR/.worker-invoked-round-3"
+setup_mock_codex_impl_feedback
+export XDG_CACHE_HOME="$TEST_DIR/.cache"
+
+set +e
+echo "$HOOK_INPUT" | CLAUDE_PROJECT_DIR="$TEST_DIR" bash "$STOP_HOOK" > /dev/null 2>&1
+HOOK_EXIT=$?
+set -e
+
+NEXT_PROMPT="$LOOP_DIR/round-4-prompt.md"
+if [[ -f "$NEXT_PROMPT" ]]; then
+    if ! grep -Fq "No codex-worker invocation was detected in round 3" "$NEXT_PROMPT"; then
+        pass "stop hook does not append missing worker warning when marker file exists"
+    else
+        fail "stop hook does not append missing worker warning when marker file exists" "no missing worker marker warning" "warning found"
+    fi
+else
+    fail "round-4 prompt exists when marker file suppresses warning" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
 fi
 
 # Verify malformed worktree_root values from state are not injected into prompts
@@ -722,6 +750,63 @@ if [[ -f "$LOOP_DIR/context-guard-recovery.md" ]]; then
     pass "context token guard writes recovery note"
 else
     fail "context token guard writes recovery note" "context-guard-recovery.md exists" "not found"
+fi
+
+# ========================================
+# Test: codex-worker writes round marker after successful exec
+# ========================================
+
+setup_test_dir
+init_test_git_repo "$TEST_DIR/project"
+
+mkdir -p "$TEST_DIR/project/.humanize/rlcr/2026-01-02_00-00-00"
+LOOP_DIR="$TEST_DIR/project/.humanize/rlcr/2026-01-02_00-00-00"
+cat > "$LOOP_DIR/state.md" << 'STATE_EOF'
+---
+current_round: 2
+max_iterations: 42
+review_started: false
+---
+STATE_EOF
+
+mkdir -p "$TEST_DIR/bin"
+cat > "$TEST_DIR/bin/codex" << 'MOCK_EOF'
+#!/bin/bash
+if [[ "$1" == "exec" ]]; then
+    cat > /dev/null
+    echo "Worker completed"
+    exit 0
+fi
+echo "Unexpected command: $*" >&2
+exit 1
+MOCK_EOF
+chmod +x "$TEST_DIR/bin/codex"
+
+set +e
+WORKER_OUTPUT=$(
+    cd "$TEST_DIR/project" && \
+    PATH="$TEST_DIR/bin:$PATH" XDG_CACHE_HOME="$TEST_DIR/.cache" \
+        bash "$CODEX_WORKER_SCRIPT" "Implement marker behavior test"
+)
+WORKER_EXIT=$?
+set -e
+
+if [[ "$WORKER_EXIT" -eq 0 ]]; then
+    pass "codex-worker succeeds with mock codex exec"
+else
+    fail "codex-worker succeeds with mock codex exec" "exit 0" "exit $WORKER_EXIT"
+fi
+
+if [[ -f "$LOOP_DIR/.worker-invoked-round-2" ]]; then
+    pass "codex-worker creates .worker-invoked-round-N marker in active loop"
+else
+    fail "codex-worker creates .worker-invoked-round-N marker in active loop" ".worker-invoked-round-2 exists" "not found"
+fi
+
+if echo "$WORKER_OUTPUT" | grep -q "Worker completed"; then
+    pass "codex-worker returns mock codex output after marker creation"
+else
+    fail "codex-worker returns mock codex output after marker creation" "Worker completed in stdout" "$WORKER_OUTPUT"
 fi
 
 # ========================================

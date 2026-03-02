@@ -78,6 +78,23 @@ for BAD_VALUE in "0" "false" "yes" "true"; do
     fi
 done
 
+# Test: invalid delegation enforcement env value is rejected
+set +e
+SETUP_OUTPUT=$(HUMANIZE_CODEX_DELEGATION_ENFORCEMENT=hard CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 CLAUDE_PROJECT_DIR="$TEST_DIR/project" \
+    bash "$SETUP_SCRIPT" --agent-teams temp/plan.md 2>&1)
+SETUP_EXIT=$?
+set -e
+if [[ "$SETUP_EXIT" -ne 0 ]]; then
+    pass "setup rejects invalid HUMANIZE_CODEX_DELEGATION_ENFORCEMENT value"
+else
+    fail "setup rejects invalid HUMANIZE_CODEX_DELEGATION_ENFORCEMENT value" "non-zero exit" "exit 0"
+fi
+if echo "$SETUP_OUTPUT" | grep -q "HUMANIZE_CODEX_DELEGATION_ENFORCEMENT must be 'warn' or 'strict'"; then
+    pass "invalid delegation enforcement error message is descriptive"
+else
+    fail "invalid delegation enforcement error message is descriptive" "warn/strict validation message" "$SETUP_OUTPUT"
+fi
+
 # ========================================
 # Test: --agent-teams succeeds with env var set
 # ========================================
@@ -118,6 +135,45 @@ if [[ -n "$STATE_FILE" ]] && grep -q "^agent_teams: true" "$STATE_FILE"; then
     pass "agent_teams: true recorded in state.md with --agent-teams"
 else
     fail "agent_teams: true recorded in state.md with --agent-teams" "agent_teams: true" "$(grep 'agent_teams' "$STATE_FILE" 2>/dev/null || echo 'not found')"
+fi
+
+if [[ -n "$STATE_FILE" ]] && grep -q "^delegation_enforcement: warn" "$STATE_FILE"; then
+    pass "delegation_enforcement defaults to warn in state.md when env is unset"
+else
+    fail "delegation_enforcement defaults to warn in state.md when env is unset" "delegation_enforcement: warn" "$(grep 'delegation_enforcement' "$STATE_FILE" 2>/dev/null || echo 'not found')"
+fi
+
+# ========================================
+# Test: delegation_enforcement: strict is recorded when env requests strict mode
+# ========================================
+
+setup_test_dir
+init_test_git_repo "$TEST_DIR/project"
+
+mkdir -p "$TEST_DIR/project/temp"
+cat > "$TEST_DIR/project/temp/plan.md" << 'EOF'
+# Test Plan
+
+This is a test plan with enough content.
+Line 3 with meaningful content.
+Line 4 with more content.
+Line 5 final content line.
+EOF
+
+echo "temp/" > "$TEST_DIR/project/.gitignore"
+cd "$TEST_DIR/project"
+git add .gitignore
+git commit -q -m "Add gitignore"
+
+cd "$TEST_DIR/project"
+HUMANIZE_CODEX_DELEGATION_ENFORCEMENT=strict CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 CLAUDE_PROJECT_DIR="$TEST_DIR/project" \
+    bash "$SETUP_SCRIPT" --agent-teams temp/plan.md > /dev/null 2>&1 || true
+
+STATE_FILE=$(find "$TEST_DIR/project/.humanize/rlcr" -name "state.md" -type f 2>/dev/null | head -1)
+if [[ -n "$STATE_FILE" ]] && grep -q "^delegation_enforcement: strict" "$STATE_FILE"; then
+    pass "delegation_enforcement: strict recorded in state.md"
+else
+    fail "delegation_enforcement: strict recorded in state.md" "delegation_enforcement: strict" "$(grep 'delegation_enforcement' "$STATE_FILE" 2>/dev/null || echo 'not found')"
 fi
 
 # ========================================
@@ -431,6 +487,7 @@ setup_stophook_test() {
     local agent_teams="$2"
     local review_started="${3:-false}"
     local base_commit="${4:-abc123}"
+    local delegation_enforcement="${5:-warn}"
 
     setup_test_dir
     cd "$TEST_DIR"
@@ -486,6 +543,7 @@ ask_codex_question: false
 full_review_round: 5
 session_id:
 agent_teams: $agent_teams
+delegation_enforcement: $delegation_enforcement
 ---
 STATE_EOF
 
@@ -600,6 +658,116 @@ if [[ -f "$NEXT_PROMPT" ]]; then
     fi
 else
     fail "impl phase with agent_teams=true: no agent-teams continuation template in next-round prompt" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
+fi
+
+# ========================================
+# Test: strict delegation enforcement injects STRICT block in next-round prompt
+# ========================================
+
+setup_stophook_test 3 "true" "false" "abc123" "strict"
+setup_mock_codex_impl_feedback "## Review Feedback
+
+Some issues found:
+- Issue 1: Missing error handling
+
+Please address and try again.
+
+CONTINUE"
+
+HOOK_INPUT='{"stop_hook_active": false, "transcript": [], "session_id": ""}'
+set +e
+RESULT=$(echo "$HOOK_INPUT" | CLAUDE_PROJECT_DIR="$TEST_DIR" bash "$STOP_HOOK" 2>/dev/null)
+HOOK_EXIT=$?
+set -e
+
+NEXT_PROMPT="$LOOP_DIR/round-4-prompt.md"
+if [[ -f "$NEXT_PROMPT" ]]; then
+    if grep -Fq "## STRICT MODE: Delegation Enforcement" "$NEXT_PROMPT"; then
+        pass "strict delegation enforcement injects STRICT block in next-round prompt"
+    else
+        fail "strict delegation enforcement injects STRICT block in next-round prompt" "STRICT mode heading" "not found"
+    fi
+    if ! grep -Fq "**Delegation Warning**" "$NEXT_PROMPT"; then
+        pass "strict delegation mode excludes warn-only delegation line"
+    else
+        fail "strict delegation mode excludes warn-only delegation line" "warn-only line absent" "warn line found"
+    fi
+else
+    fail "strict delegation enforcement injects STRICT block in next-round prompt" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
+fi
+
+# ========================================
+# Test: warn delegation enforcement injects warning line in next-round prompt
+# ========================================
+
+setup_stophook_test 3 "true" "false" "abc123" "warn"
+setup_mock_codex_impl_feedback "## Review Feedback
+
+Some issues found:
+- Issue 1: Missing error handling
+
+Please address and try again.
+
+CONTINUE"
+
+HOOK_INPUT='{"stop_hook_active": false, "transcript": [], "session_id": ""}'
+set +e
+RESULT=$(echo "$HOOK_INPUT" | CLAUDE_PROJECT_DIR="$TEST_DIR" bash "$STOP_HOOK" 2>/dev/null)
+HOOK_EXIT=$?
+set -e
+
+NEXT_PROMPT="$LOOP_DIR/round-4-prompt.md"
+if [[ -f "$NEXT_PROMPT" ]]; then
+    if grep -Fq "**Delegation Warning**: Delegate coding to \`/humanize:codex-worker\`; direct self-implementation can be flagged as non-compliant." "$NEXT_PROMPT"; then
+        pass "warn delegation enforcement injects warning line in next-round prompt"
+    else
+        fail "warn delegation enforcement injects warning line in next-round prompt" "warn delegation line" "not found"
+    fi
+    if ! grep -Fq "## STRICT MODE: Delegation Enforcement" "$NEXT_PROMPT"; then
+        pass "warn delegation mode excludes STRICT enforcement block"
+    else
+        fail "warn delegation mode excludes STRICT enforcement block" "no STRICT block" "STRICT block found"
+    fi
+else
+    fail "warn delegation enforcement injects warning line in next-round prompt" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
+fi
+
+# ========================================
+# Test: missing delegation_enforcement in state defaults to warn prompt behavior
+# ========================================
+
+setup_stophook_test 3 "true" "false"
+awk '{
+    if ($0 ~ /^delegation_enforcement:/) {
+        next
+    }
+    print
+}' "$LOOP_DIR/state.md" > "$LOOP_DIR/state.tmp"
+mv "$LOOP_DIR/state.tmp" "$LOOP_DIR/state.md"
+setup_mock_codex_impl_feedback "## Review Feedback
+
+Some issues found:
+- Issue 1: Missing error handling
+
+Please address and try again.
+
+CONTINUE"
+
+HOOK_INPUT='{"stop_hook_active": false, "transcript": [], "session_id": ""}'
+set +e
+RESULT=$(echo "$HOOK_INPUT" | CLAUDE_PROJECT_DIR="$TEST_DIR" bash "$STOP_HOOK" 2>/dev/null)
+HOOK_EXIT=$?
+set -e
+
+NEXT_PROMPT="$LOOP_DIR/round-4-prompt.md"
+if [[ -f "$NEXT_PROMPT" ]]; then
+    if grep -Fq "**Delegation Warning**: Delegate coding to \`/humanize:codex-worker\`; direct self-implementation can be flagged as non-compliant." "$NEXT_PROMPT"; then
+        pass "missing delegation_enforcement defaults to warn behavior in next-round prompt"
+    else
+        fail "missing delegation_enforcement defaults to warn behavior in next-round prompt" "warn delegation line" "not found"
+    fi
+else
+    fail "missing delegation_enforcement defaults to warn behavior in next-round prompt" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
 fi
 
 # ========================================
