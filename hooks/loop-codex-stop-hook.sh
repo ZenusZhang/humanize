@@ -124,6 +124,7 @@ WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
 WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
 WORKTREE_ROOT_SAFE="$WORKTREE_ROOT"
 if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
+    # Normalize: strip leading ./, collapse duplicate slashes, strip trailing slash
     while [[ "$WORKTREE_ROOT_SAFE" == ./* ]]; do
         WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE#./}"
     done
@@ -131,16 +132,17 @@ if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
         WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE//\/\//\/}"
     done
     WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE%/}"
-fi
-if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
-    if [[ ! "$WORKTREE_ROOT_SAFE" =~ ^[a-zA-Z0-9._/-]+$ ]] || \
-       [[ "$WORKTREE_ROOT_SAFE" = /* ]] || \
-       [[ "$WORKTREE_ROOT_SAFE" =~ (^|/)\.\.(/|$) ]] || \
-       [[ "$WORKTREE_ROOT_SAFE" == "." ]] || \
-       [[ "$WORKTREE_ROOT_SAFE" == ".git" ]] || \
-       [[ "$WORKTREE_ROOT_SAFE" == .git/* ]]; then
-        # Ignore malformed/unsafe state values rather than injecting untrusted content into prompts
-        WORKTREE_ROOT_SAFE=""
+    # Validate: reject unsafe paths (normalization may have emptied the value)
+    if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
+        if [[ ! "$WORKTREE_ROOT_SAFE" =~ ^[a-zA-Z0-9._/-]+$ ]] || \
+           [[ "$WORKTREE_ROOT_SAFE" = /* ]] || \
+           [[ "$WORKTREE_ROOT_SAFE" =~ (^|/)\.\.(/|$) ]] || \
+           [[ "$WORKTREE_ROOT_SAFE" == "." ]] || \
+           [[ "$WORKTREE_ROOT_SAFE" == ".git" ]] || \
+           [[ "$WORKTREE_ROOT_SAFE" == .git/* ]]; then
+            # Ignore malformed/unsafe state values rather than injecting untrusted content into prompts
+            WORKTREE_ROOT_SAFE=""
+        fi
     fi
 fi
 DELEGATION_ENFORCEMENT="${STATE_DELEGATION_ENFORCEMENT:-warn}"
