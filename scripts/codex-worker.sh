@@ -58,7 +58,7 @@ OPTIONS:
                        Worker model and reasoning effort (default: gpt-5.3-codex:xhigh)
   --worker-timeout <SECONDS>
                        Timeout for the worker run in seconds (default: 5400)
-  --workdir <PATH>     Directory to run in (defaults to git root of CWD)
+  --workdir <PATH>     Directory to run in (defaults to current working directory)
   -h, --help           Show this help message
 
 DESCRIPTION:
@@ -260,7 +260,16 @@ write_worker_invocation_marker() {
     local current_round=""
     local marker_file=""
 
-    loop_dir="$(find_active_loop_for_marker "$project_root")"
+    # Honour LOOP_DIR if set (passed by stop hook to identify its own loop)
+    if [[ -n "${LOOP_DIR:-}" ]]; then
+        loop_dir="$LOOP_DIR"
+        if [[ ! -f "$loop_dir/state.md" ]] || [[ -f "$loop_dir/cancel-state.md" ]] || [[ -f "$loop_dir/finalize-state.md" ]]; then
+            return 0
+        fi
+    else
+        loop_dir="$(find_active_loop_for_marker "$project_root")"
+    fi
+
     if [[ -z "$loop_dir" ]]; then
         return 0
     fi
