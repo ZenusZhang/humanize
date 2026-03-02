@@ -81,6 +81,7 @@ TEST_SUITES=(
     "test-gen-plan.sh"
     "test-task-tag-routing.sh"
     "test-bitlesson-workflow.sh"
+    "test-gen-batch-prompt.sh"
     "test-pr-loop-1-scripts.sh"
     "test-pr-loop-2-hooks.sh"
     "test-pr-loop-3-stophook.sh"

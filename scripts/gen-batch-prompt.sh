@@ -1,0 +1,334 @@
+#!/bin/bash
+#
+# gen-batch-prompt.sh
+#
+# Generate a ready-to-paste prompt for Claude Code's `/batch` using the active
+# RLCR loop's document-centered `worktree-assignment.md` Parallelization Matrix.
+#
+# This helper does NOT start any agents. It only prints a prompt to stdout.
+#
+# Usage:
+#   /humanize:gen-batch-prompt [--loop-dir <PATH>] [--project-root <PATH>]
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
+# Source shared loop utilities (find_active_loop, resolve_active_state_file)
+HOOKS_LIB_DIR="$(cd "$SCRIPT_DIR/../hooks/lib" && pwd)"
+source "$HOOKS_LIB_DIR/loop-common.sh"
+
+PROJECT_ROOT=""
+LOOP_DIR=""
+
+show_help() {
+    cat << 'HELP_EOF'
+gen-batch-prompt - Generate a Claude Code `/batch` dispatch prompt from worktree-assignment.md
+
+USAGE:
+  /humanize:gen-batch-prompt [OPTIONS]
+
+OPTIONS:
+  --loop-dir <PATH>       Explicit RLCR loop directory (defaults to active loop)
+  --project-root <PATH>   Project root (defaults to git root of CWD)
+  -h, --help              Show this help message
+
+NOTES:
+  - Tasks are selected from the "Parallelization Matrix" where
+    Parallelizable (yes/no) == "yes" (case-insensitive).
+  - If no tasks are marked as parallelizable, the script prints a reminder
+    to edit worktree-assignment.md.
+HELP_EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            show_help
+            ;;
+        --loop-dir)
+            if [[ -z "${2:-}" ]]; then
+                echo "Error: --loop-dir requires a path argument" >&2
+                exit 1
+            fi
+            LOOP_DIR="$2"
+            shift 2
+            ;;
+        --project-root)
+            if [[ -z "${2:-}" ]]; then
+                echo "Error: --project-root requires a path argument" >&2
+                exit 1
+            fi
+            PROJECT_ROOT="$2"
+            shift 2
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            echo "Use --help for usage information." >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$PROJECT_ROOT" ]]; then
+    local_root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+    if git -C "$local_root" rev-parse --show-toplevel >/dev/null 2>&1; then
+        PROJECT_ROOT=$(git -C "$local_root" rev-parse --show-toplevel)
+    else
+        PROJECT_ROOT="$local_root"
+    fi
+fi
+
+if [[ -z "$LOOP_DIR" ]]; then
+    LOOP_DIR=$(find_active_loop "$PROJECT_ROOT/.humanize/rlcr")
+    if [[ -z "$LOOP_DIR" ]]; then
+        echo "Error: No active RLCR loop found under: $PROJECT_ROOT/.humanize/rlcr" >&2
+        echo "Hint: Run /humanize:start-rlcr-loop first, or pass --loop-dir explicitly." >&2
+        exit 1
+    fi
+fi
+
+if [[ "$LOOP_DIR" != /* ]]; then
+    LOOP_DIR="$PROJECT_ROOT/$LOOP_DIR"
+fi
+
+ASSIGNMENT_FILE="$LOOP_DIR/worktree-assignment.md"
+if [[ ! -f "$ASSIGNMENT_FILE" ]]; then
+    echo "Error: worktree assignment file not found: $ASSIGNMENT_FILE" >&2
+    echo "Hint: Run /humanize:setup-worktree-teams (or start loop with --worktree-teams)." >&2
+    exit 1
+fi
+
+PLAN_FILE="$LOOP_DIR/plan.md"
+if [[ ! -f "$PLAN_FILE" ]]; then
+    STATE_FILE=$(resolve_active_state_file "$LOOP_DIR")
+    if [[ -n "$STATE_FILE" ]]; then
+        PLAN_FILE_FROM_STATE=$(sed -n '/^---$/,/^---$/{ /^plan_file:/{ s/^plan_file:[[:space:]]*//; p; } }' "$STATE_FILE" | head -n 1)
+        if [[ -n "$PLAN_FILE_FROM_STATE" ]]; then
+            if [[ "$PLAN_FILE_FROM_STATE" = /* ]]; then
+                PLAN_FILE="$PLAN_FILE_FROM_STATE"
+            else
+                PLAN_FILE="$PROJECT_ROOT/$PLAN_FILE_FROM_STATE"
+            fi
+        fi
+    fi
+fi
+
+if [[ ! -f "$PLAN_FILE" ]]; then
+    echo "Warning: plan file not found; task descriptions may be missing." >&2
+    echo "  Expected: $LOOP_DIR/plan.md or plan_file from state.md" >&2
+    PLAN_FILE="/dev/null"
+fi
+
+cat << 'HEADER_EOF'
+# `/batch` Parallel Dispatch (Humanize) / `/batch` 并行分发（Humanize）
+
+Paste the next section into Claude Code `/batch`.
+
+- Goal: start truly-parallel work across isolated lanes (worktrees) WITHOUT file conflicts.
+- Source of truth: `worktree-assignment.md` "Parallelization Matrix".
+
+Hard rules:
+1. Do not modify files outside your lane's `File Ownership`.
+2. Work inside your lane's `Worktree Path` (git worktree isolation).
+3. Respect `blockedBy` dependencies. If a dependency is owned by another lane, coordinate before starting.
+4. Each lane produces focused commits and a short written summary (files changed + tests run).
+
+Cross-vendor context (required by Humanize):
+- Your output will be reviewed independently (cross-vendor style), even if all models are from the same provider today.
+
+---
+
+## Lanes / Lane 列表
+HEADER_EOF
+
+printf '\n- Project root: `%s`\n' "$PROJECT_ROOT"
+printf -- '- Loop dir: `%s`\n' "$LOOP_DIR"
+printf -- '- Plan: `%s`\n' "$PLAN_FILE"
+printf -- '- Assignment: `%s`\n' "$ASSIGNMENT_FILE"
+
+LANES_OUTPUT=$(
+    awk '
+        function trim(text) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
+            return text
+        }
+        function strip_ticks(text) {
+            text = trim(text)
+            if (text ~ /^`[^`]*`$/) {
+                return substr(text, 2, length(text) - 2)
+            }
+            return text
+        }
+        function is_separator_row() {
+            if (cell_count == 0) return 1
+            for (k = 1; k <= cell_count; k++) {
+                if (cells_lc[k] !~ /^:?-+:?$/) return 0
+            }
+            return 1
+        }
+        function parse_md_row(line) {
+            cell_count = 0
+            n = split(line, raw_cells, "|")
+            for (i = 1; i <= n; i++) {
+                cell = trim(raw_cells[i])
+                if ((i == 1 || i == n) && cell == "") {
+                    continue
+                }
+                cell_count++
+                cells_raw[cell_count] = cell
+                cells_lc[cell_count] = tolower(cell)
+            }
+            return cell_count
+        }
+
+        BEGIN {
+            # plan mapping
+            plan_task_col = 0
+            plan_desc_col = 0
+
+            # assignment matrix
+            in_matrix = 0
+            mat_task_col = 0
+            mat_parallel_col = 0
+            mat_owner_col = 0
+            mat_blocked_col = 0
+            mat_worker_col = 0
+            mat_reviewer_col = 0
+            mat_worktree_col = 0
+
+            worker_count = 0
+            task_total = 0
+        }
+
+        FNR == NR {
+            # Parse any markdown table that contains "Task ID" and "Description"
+            if ($0 ~ /^\|/) {
+                parse_md_row($0)
+                if (cell_count == 0 || is_separator_row()) next
+
+                if (plan_task_col == 0 || plan_desc_col == 0) {
+                    tmp_task_col = 0
+                    tmp_desc_col = 0
+                    for (j = 1; j <= cell_count; j++) {
+                        if (cells_lc[j] == "task id" || cells_lc[j] == "taskid" || cells_lc[j] == "task") tmp_task_col = j
+                        if (cells_lc[j] == "description" || cells_lc[j] == "desc") tmp_desc_col = j
+                    }
+                    if (tmp_task_col > 0 && tmp_desc_col > 0) {
+                        plan_task_col = tmp_task_col
+                        plan_desc_col = tmp_desc_col
+                        next
+                    }
+                }
+
+                if (plan_task_col > 0 && plan_desc_col > 0 && plan_task_col <= cell_count && plan_desc_col <= cell_count) {
+                    task_id = trim(cells_raw[plan_task_col])
+                    desc = trim(cells_raw[plan_desc_col])
+                    if (tolower(task_id) ~ /^task[0-9a-z._-]+$/) {
+                        plan_desc[task_id] = desc
+                    }
+                }
+            }
+            next
+        }
+
+        {
+            if ($0 ~ /^##[[:space:]]+Parallelization Matrix[[:space:]]*$/) {
+                in_matrix = 1
+                next
+            }
+            if (!in_matrix) next
+
+            if ($0 !~ /^\|/) next
+            parse_md_row($0)
+            if (cell_count == 0 || is_separator_row()) next
+
+            # Detect matrix header row
+            if (mat_task_col == 0) {
+                for (j = 1; j <= cell_count; j++) {
+                    if (cells_lc[j] == "task id" || cells_lc[j] == "taskid" || cells_lc[j] == "task") mat_task_col = j
+                    if (cells_lc[j] ~ /^parallelizable/) mat_parallel_col = j
+                    if (cells_lc[j] == "file ownership" || cells_lc[j] == "ownership") mat_owner_col = j
+                    if (cells_lc[j] == "blockedby" || cells_lc[j] == "blocked by" || cells_lc[j] == "depends on") mat_blocked_col = j
+                    if (cells_lc[j] == "worker") mat_worker_col = j
+                    if (cells_lc[j] == "reviewer") mat_reviewer_col = j
+                    if (cells_lc[j] == "worktree path" || cells_lc[j] == "worktree") mat_worktree_col = j
+                }
+                if (mat_task_col > 0 && mat_parallel_col > 0 && mat_worker_col > 0 && mat_worktree_col > 0) {
+                    next
+                }
+            }
+
+            if (mat_task_col == 0 || mat_parallel_col == 0) next
+
+            task_id = trim(cells_raw[mat_task_col])
+            parallel = tolower(trim(cells_raw[mat_parallel_col]))
+            if (parallel != "yes") next
+
+            worker = (mat_worker_col > 0 && mat_worker_col <= cell_count) ? strip_ticks(cells_raw[mat_worker_col]) : ""
+            reviewer = (mat_reviewer_col > 0 && mat_reviewer_col <= cell_count) ? strip_ticks(cells_raw[mat_reviewer_col]) : ""
+            worktree = (mat_worktree_col > 0 && mat_worktree_col <= cell_count) ? strip_ticks(cells_raw[mat_worktree_col]) : ""
+            blocked = (mat_blocked_col > 0 && mat_blocked_col <= cell_count) ? trim(cells_raw[mat_blocked_col]) : "-"
+            ownership = (mat_owner_col > 0 && mat_owner_col <= cell_count) ? trim(cells_raw[mat_owner_col]) : ""
+
+            if (worker == "") worker = "worker-?"
+            if (worktree == "") worktree = "[missing worktree path]"
+            if (blocked == "") blocked = "-"
+            if (ownership == "") ownership = "[missing file ownership]"
+
+            if (!(worker in seen_worker)) {
+                worker_count++
+                worker_order[worker_count] = worker
+                seen_worker[worker] = 1
+                worker_worktree[worker] = worktree
+                worker_reviewer[worker] = reviewer
+            }
+
+            desc = (task_id in plan_desc) ? plan_desc[task_id] : "[missing description in plan]"
+
+            task_total++
+            tasks[worker] = tasks[worker] sprintf("- %s: %s (blockedBy: %s; ownership: %s)\n", task_id, desc, blocked, ownership)
+        }
+
+        END {
+            if (task_total == 0) {
+                exit 0
+            }
+
+            for (i = 1; i <= worker_count; i++) {
+                w = worker_order[i]
+                print ""
+                printf("### Lane %s\n", w)
+                printf("- Worktree: `%s`\n", worker_worktree[w])
+                if (worker_reviewer[w] != "") {
+                    printf("- Reviewer: `%s`\n", worker_reviewer[w])
+                }
+                printf("- Commands: `cd %s`\n", worker_worktree[w])
+                print "- Tasks:"
+                # Indent task lines under the Tasks bullet for readability
+                split(tasks[w], lines, "\n")
+                for (j = 1; j <= length(lines); j++) {
+                    if (lines[j] == "") continue
+                    printf("  %s\n", lines[j])
+                }
+            }
+        }
+    ' "$PLAN_FILE" "$ASSIGNMENT_FILE"
+)
+
+if [[ -z "$LANES_OUTPUT" ]]; then
+    cat << 'EMPTY_EOF'
+
+No tasks are marked `Parallelizable=yes` in `worktree-assignment.md`.
+
+Next:
+1) Open `worktree-assignment.md` and set `Parallelizable (yes/no)` to `yes` for safe tasks
+2) Fill `File Ownership` to prevent collisions
+3) Re-run: `/humanize:gen-batch-prompt`
+EMPTY_EOF
+    exit 0
+fi
+
+echo "$LANES_OUTPUT"

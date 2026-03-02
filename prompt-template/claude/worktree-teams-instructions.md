@@ -35,3 +35,12 @@ Before running worker tasks, create worktree lanes:
 
 The script writes lane mappings to `worktree-assignment.md` in the active RLCR loop directory.
 Use that mapping directly when assigning worker/reviewer tasks.
+
+### Optional: Use Claude Code `/batch` to Kick Off Lanes
+
+If your Claude Code supports `/batch`, you can use it to start lane work in parallel (Humanize still uses `worktree-assignment.md` as the source of truth).
+
+Suggested flow:
+1. Run `/humanize:gen-batch-prompt` to generate a ready-to-paste dispatch prompt from `worktree-assignment.md`
+2. Run Claude Code `/batch` and paste the generated prompt
+3. Ensure every agent stays within its lane’s `Worktree Path` + `File Ownership` boundaries
