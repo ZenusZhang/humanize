@@ -172,10 +172,13 @@ fi
 # ---------------------------------------------------------------------------
 # Readiness filtering
 # ---------------------------------------------------------------------------
-# READY_TASK_IDS: space-separated list of ready task IDs, or empty string to
-# mean "no filtering" (include all Parallelizable=yes tasks).
+# READY_TASK_IDS: space-separated list of ready task IDs.
+# READY_FILTER_ACTIVE: 1 when task-graph.py ran successfully with a state file,
+#   so AWK enforces the ready set even when it is empty (nothing ready = no
+#   tasks emitted).  0 means no state file / fallback: all tasks pass through.
 # BLOCKED_ANNOTATION_ACTIVE: set to 1 if --include-blocked was given.
 READY_TASK_IDS=""
+READY_FILTER_ACTIVE=0
 BLOCKED_ANNOTATION_ACTIVE=0
 TASK_STATE_FILE="$LOOP_DIR/task-state.json"
 TASK_GRAPH_SCRIPT="$SCRIPT_DIR/task-graph.py"
@@ -196,13 +199,13 @@ if [[ "$INCLUDE_BLOCKED" -eq 1 ]]; then
             if READY_OUTPUT=$(python3 "$TASK_GRAPH_SCRIPT" "${READY_CMD_ARGS[@]}" 2>/dev/null); then
                 READY_TASK_IDS=$(printf '%s' "$READY_OUTPUT" | tr '\n' ' ')
             else
-                echo "WARNING: task-graph.py ready failed; blocked annotations will not be applied" >&2
+                echo "WARNING: task-graph.py ready failed; skipping readiness check" >&2
             fi
         fi
     fi
 elif [[ ! -f "$TASK_STATE_FILE" ]]; then
     # No state file: backward-compatible, include all tasks without filtering
-    : # do nothing; READY_TASK_IDS stays empty
+    : # do nothing; READY_FILTER_ACTIVE and READY_TASK_IDS stay at defaults
 else
     # State file exists: attempt readiness check via task-graph.py
     if ! python3 "$TASK_GRAPH_SCRIPT" --help >/dev/null 2>&1; then
@@ -213,10 +216,12 @@ else
         if [[ -f "$ASSIGNMENT_FILE" ]]; then
             READY_CMD_ARGS+=(--assignment "$ASSIGNMENT_FILE")
         fi
-        # Run task-graph.py ready; on error, warn and fall back to all tasks
+        # Run task-graph.py ready; on success activate filter (even if empty)
         if READY_OUTPUT=$(python3 "$TASK_GRAPH_SCRIPT" "${READY_CMD_ARGS[@]}" 2>/dev/null); then
             # Build a space-separated list of ready task IDs (one per line from output)
             READY_TASK_IDS=$(printf '%s' "$READY_OUTPUT" | tr '\n' ' ')
+            # Mark filter active: an empty ready set means nothing is ready yet
+            READY_FILTER_ACTIVE=1
         else
             echo "WARNING: task-graph.py ready failed; skipping readiness check" >&2
         fi
@@ -261,6 +266,7 @@ printf -- '- Assignment: `%s`\n' "$ASSIGNMENT_FILE"
 LANES_OUTPUT=$(
     awk \
         -v ready_ids="$READY_TASK_IDS" \
+        -v ready_filter_active="$READY_FILTER_ACTIVE" \
         -v blocked_annotation="$BLOCKED_ANNOTATION_ACTIVE" \
         -v max_tasks_per_lane="$MAX_TASKS_PER_LANE" \
         -v strict_blockedby="$STRICT_BLOCKEDBY" \
@@ -318,10 +324,11 @@ LANES_OUTPUT=$(
 
         BEGIN {
             # Build a lookup set from the space-separated ready_ids string.
-            # If ready_ids is empty, use_ready_filter is 0 (no filtering).
-            use_ready_filter = 0
+            # use_ready_filter is enabled by ready_filter_active (set when task-graph.py
+            # ran successfully with a state file) so that an empty ready set correctly
+            # filters ALL tasks out rather than falling back to no-filter behavior.
+            use_ready_filter = (ready_filter_active == 1)
             if (ready_ids != "") {
-                use_ready_filter = 1
                 n_ready = split(ready_ids, ready_arr, " ")
                 for (ri = 1; ri <= n_ready; ri++) {
                     tid = ready_arr[ri]

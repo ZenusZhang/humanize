@@ -14,6 +14,7 @@ Provides subcommands:
   reset-lane     -- Reset the iteration count for a lane to 0
   ready          -- Compute and print the ready set of tasks in topological order
 """
+from __future__ import annotations
 
 import argparse
 import json
@@ -233,7 +234,11 @@ def build_graph(
         if task_id not in graph:
             graph[task_id] = set()
         for dep in blocked_list:
-            graph[task_id].add(dep)
+            # Only add dep as a graph edge when it refers to a known task.
+            # External constraints (free-form text) are not graph dependencies;
+            # they are surfaced as warnings by validate_graph() / compute_ready_set().
+            if dep in plan_deps or dep in assignment_blocked:
+                graph[task_id].add(dep)
 
     return graph
 

@@ -780,3 +780,37 @@ class TestDetectCycleOptionalReturn:
         assert result is not None
         assert len(result) >= 2
 
+
+# ===========================================================================
+# 14. Regression tests for Round 6 code-review fixes
+# ===========================================================================
+
+
+class TestBuildGraphExternalBlocker:
+    """build_graph() must NOT add external blockedBy text as graph edges."""
+
+    def test_external_blocker_excluded_from_graph(self):
+        # plan_deps has task1 with no deps; assignment says task1 is blocked by
+        # a free-form string — that string must not become a graph edge.
+        plan_deps = {"task1": []}
+        assignment_blocked = {"task1": ["waiting on API key"]}
+        graph = task_graph.build_graph(plan_deps, assignment_blocked)
+        # "waiting on API key" is not a known task -> must not appear as a dep
+        assert graph["task1"] == set()
+
+    def test_known_task_blocker_included_in_graph(self):
+        # task2 is blocked by task1 (a known task) -> must appear as a dep
+        plan_deps = {"task1": [], "task2": []}
+        assignment_blocked = {"task2": ["task1"]}
+        graph = task_graph.build_graph(plan_deps, assignment_blocked)
+        assert "task1" in graph["task2"]
+
+    def test_mixed_blockers_only_known_task_ids_included(self):
+        # task2 has both a known task dep and external text
+        plan_deps = {"task1": [], "task2": []}
+        assignment_blocked = {"task2": ["task1", "external constraint"]}
+        graph = task_graph.build_graph(plan_deps, assignment_blocked)
+        assert "task1" in graph["task2"]
+        assert "external constraint" not in graph["task2"]
+
+
