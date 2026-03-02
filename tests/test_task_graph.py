@@ -814,3 +814,102 @@ class TestBuildGraphExternalBlocker:
         assert "external constraint" not in graph["task2"]
 
 
+# ===========================================================================
+# 15. Regression tests for Round 8 code-review fixes
+# ===========================================================================
+
+
+class TestNormalizeDepListNoneNa:
+    """_normalize_dep_list() must treat 'none'/'n/a' as no-deps (P2 fix)."""
+
+    def test_none_lowercase_returns_empty(self):
+        assert task_graph._normalize_dep_list("none") == []
+
+    def test_none_uppercase_returns_empty(self):
+        assert task_graph._normalize_dep_list("NONE") == []
+
+    def test_none_mixed_case_returns_empty(self):
+        assert task_graph._normalize_dep_list("None") == []
+
+    def test_na_lowercase_returns_empty(self):
+        assert task_graph._normalize_dep_list("n/a") == []
+
+    def test_na_uppercase_returns_empty(self):
+        assert task_graph._normalize_dep_list("N/A") == []
+
+    def test_none_in_comma_list_skipped(self):
+        # 'none' as one entry among real task IDs should be dropped
+        result = task_graph._normalize_dep_list("task1, none, task2")
+        assert result == ["task1", "task2"]
+
+    def test_na_in_comma_list_skipped(self):
+        result = task_graph._normalize_dep_list("task1, n/a")
+        assert result == ["task1"]
+
+    def test_real_task_id_not_affected(self):
+        # A task ID that merely contains 'none' as a substring must not be dropped
+        result = task_graph._normalize_dep_list("task-none-1")
+        assert result == ["task-none-1"]
+
+
+class TestParsePlanFileMissing:
+    """parse_plan_file() must exit cleanly on missing plan file (P3 fix)."""
+
+    def test_missing_plan_file_exits_nonzero(self, tmp_path):
+        missing = str(tmp_path / "does_not_exist.md")
+        with pytest.raises(SystemExit) as exc_info:
+            task_graph.parse_plan_file(missing)
+        assert exc_info.value.code != 0
+
+    def test_missing_plan_file_prints_error(self, tmp_path, capsys):
+        missing = str(tmp_path / "does_not_exist.md")
+        with pytest.raises(SystemExit):
+            task_graph.parse_plan_file(missing)
+        captured = capsys.readouterr()
+        assert "ERROR" in captured.err
+        assert "does_not_exist.md" in captured.err
+
+
+class TestCmdInitMissingAssignment:
+    """cmd_init() must error on explicitly specified but absent assignment file (P3 fix)."""
+
+    def test_init_missing_assignment_returns_error(self, tmp_path):
+        plan = str(tmp_path / "plan.md")
+        write_plan_file(plan, [("task1", "-")])
+        state = str(tmp_path / "state.json")
+        missing_asgn = str(tmp_path / "no_such_assignment.md")
+        args = make_simple_args(plan=plan, state=state, assignment=missing_asgn)
+        result = task_graph.cmd_init(args)
+        assert result == 1
+
+    def test_init_no_assignment_arg_succeeds(self, tmp_path):
+        plan = str(tmp_path / "plan.md")
+        write_plan_file(plan, [("task1", "-")])
+        state = str(tmp_path / "state.json")
+        args = make_simple_args(plan=plan, state=state, assignment=None)
+        result = task_graph.cmd_init(args)
+        assert result == 0
+
+
+class TestCmdReconcileMissingAssignment:
+    """cmd_reconcile() must error on explicitly specified but absent assignment file (P3 fix)."""
+
+    def test_reconcile_missing_assignment_returns_error(self, tmp_path):
+        plan = str(tmp_path / "plan.md")
+        write_plan_file(plan, [("task1", "-")])
+        state = str(tmp_path / "state.json")
+        missing_asgn = str(tmp_path / "no_such_assignment.md")
+        args = make_simple_args(plan=plan, state=state, assignment=missing_asgn)
+        result = task_graph.cmd_reconcile(args)
+        assert result == 1
+
+    def test_reconcile_no_assignment_arg_succeeds(self, tmp_path):
+        plan = str(tmp_path / "plan.md")
+        write_plan_file(plan, [("task1", "-")])
+        state = str(tmp_path / "state.json")
+        args = make_simple_args(plan=plan, state=state, assignment=None)
+        result = task_graph.cmd_reconcile(args)
+        assert result == 0
+
+
+

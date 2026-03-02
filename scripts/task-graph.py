@@ -64,17 +64,22 @@ def _normalize_dep_list(raw: str) -> list[str]:
 
     Normalization rules applied:
       - Strip backtick wrapping (e.g., `task1` -> task1)
-      - Treat '-' or empty string as meaning no dependencies
+      - Treat '-', empty string, 'none', or 'n/a' (case-insensitive) as meaning
+        no dependencies; these are common placeholder values that users fill in
+        when a task has no deps, and treating them as real tokens would cause
+        readiness-filter false negatives.
       - Strip surrounding whitespace from each entry
     """
     raw = raw.strip()
     if not raw or raw == "-":
         return []
+    if raw.lower() in ("none", "n/a"):
+        return []
     parts = raw.split(",")
     result = []
     for part in parts:
         part = part.strip().strip("`").strip()
-        if part and part != "-":
+        if part and part != "-" and part.lower() not in ("none", "n/a"):
             result.append(part)
     return result
 
@@ -94,7 +99,14 @@ def parse_plan_file(path: str) -> dict[str, list[str]]:
 
     Returns a dict mapping each task ID to its list of declared dependencies.
     Returns an empty dict if no matching table is found.
+
+    Raises SystemExit with a clear error message if the file is missing or
+    unreadable, so callers always get a predictable failure rather than a
+    raw Python stack trace.
     """
+    if not os.path.isfile(path):
+        print(f"ERROR: plan file not found or not readable: '{path}'", file=sys.stderr)
+        sys.exit(1)
     deps: dict[str, list[str]] = {}
 
     with open(path, "r", encoding="utf-8") as f:
@@ -409,8 +421,10 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     assignment_blocked: dict[str, list[str]] = {}
     if args.assignment:
-        if os.path.isfile(args.assignment):
-            assignment_blocked = parse_assignment_file(args.assignment)
+        if not os.path.isfile(args.assignment):
+            print(f"ERROR: Assignment file not found: {args.assignment}", file=sys.stderr)
+            return 1
+        assignment_blocked = parse_assignment_file(args.assignment)
 
     graph = build_graph(plan_deps, assignment_blocked)
 
@@ -539,8 +553,10 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
 
     assignment_blocked: dict[str, list[str]] = {}
     if args.assignment:
-        if os.path.isfile(args.assignment):
-            assignment_blocked = parse_assignment_file(args.assignment)
+        if not os.path.isfile(args.assignment):
+            print(f"ERROR: Assignment file not found: {args.assignment}", file=sys.stderr)
+            return 1
+        assignment_blocked = parse_assignment_file(args.assignment)
 
     graph = build_graph(plan_deps, assignment_blocked)
     live_tasks: set[str] = set(graph.keys())
