@@ -24,14 +24,15 @@ This command transforms a user's draft document into a well-structured implement
 ## Workflow Overview
 
 1. **Execution Mode Setup**: Parse optional behaviors from command arguments
-2. **IO Validation**: Validate input and output paths
-3. **Relevance Check**: Verify draft is relevant to the repository
-4. **Codex First-Pass Analysis**: Use one planning Codex before Claude synthesizes plan details
-5. **Claude Candidate Plan (v1)**: Claude builds an initial plan from draft + Codex findings
-6. **Iterative Convergence Loop**: Claude and a second Codex iteratively challenge/refine plan reasonability
-7. **Issue and Disagreement Resolution**: Resolve unresolved opposite opinions (or skip manual review if converged and auto-start mode is enabled)
-8. **Final Plan Generation**: Generate the converged structured plan.md with task routing tags and Codex handoff sections
-9. **Write and Complete**: Write output file, optionally auto-start work, and report results
+2. **Load Project Config**: Read `.humanize/config.json` and extract `chinese_plan` flag
+3. **IO Validation**: Validate input and output paths
+4. **Relevance Check**: Verify draft is relevant to the repository
+5. **Codex First-Pass Analysis**: Use one planning Codex before Claude synthesizes plan details
+6. **Claude Candidate Plan (v1)**: Claude builds an initial plan from draft + Codex findings
+7. **Iterative Convergence Loop**: Claude and a second Codex iteratively challenge/refine plan reasonability
+8. **Issue and Disagreement Resolution**: Resolve unresolved opposite opinions (or skip manual review if converged and auto-start mode is enabled)
+9. **Final Plan Generation**: Generate the converged structured plan.md with task routing tags and Codex handoff sections
+10. **Write and Complete**: Write output file, optionally write `_zh` Chinese-only variant, optionally auto-start work, and report results
 
 ## Cross-Agent Sub-Agent Protocol (MANDATORY)
 
@@ -50,6 +51,21 @@ Parse `$ARGUMENTS` and set:
 - `AUTO_START_RLCR_IF_CONVERGED=false` otherwise
 
 This option allows skipping manual plan review and starting implementation immediately, but only when plan convergence is achieved and no pending user decisions remain.
+
+---
+
+## Phase 0.5: Load Project Config
+
+After setting execution mode flags, load the project-level configuration:
+
+1. Attempt to read `.humanize/config.json` from the project root (the repository root where the command was invoked).
+2. If the file does not exist, treat all config fields as absent. This is NOT an error; continue normally.
+3. If the file exists, parse it as JSON and extract the `chinese_plan` field:
+   - If `chinese_plan` is `true` (boolean), set `CHINESE_PLAN_ENABLED=true`.
+   - Otherwise (field absent, `false`, or any non-true value), set `CHINESE_PLAN_ENABLED=false`.
+4. A malformed JSON file should be reported as a warning but must NOT stop execution; fall back to `CHINESE_PLAN_ENABLED=false`.
+
+`CHINESE_PLAN_ENABLED` controls whether a `_zh` Chinese-only variant of the output file is written in Phase 8.
 
 ---
 
@@ -492,7 +508,29 @@ If the user explicitly asks for single-language output:
 3. Preserve meaning, identifiers, and all requirements.
 4. Keep the original draft section intact.
 
-### Step 4: Optional Direct Work Start
+### Step 4: Write Chinese-Only Variant (Conditional)
+
+If `CHINESE_PLAN_ENABLED=true`, write a `_zh` variant of the output file containing only the Chinese portions of the bilingual plan:
+
+**Filename construction rule** - insert `_zh` immediately before the file extension:
+- `plan.md` becomes `plan_zh.md`
+- `docs/my-plan.md` becomes `docs/my-plan_zh.md`
+- `output` (no extension) becomes `output_zh`
+
+Algorithm:
+1. Find the last `.` in the base filename.
+2. If a `.` is found, insert `_zh` before it: `<stem>_zh.<extension>`.
+3. If no `.` is found (no extension), append `_zh` to the filename: `<filename>_zh`.
+4. The `_zh` file is placed in the same directory as the main output file.
+
+**Content of the `_zh` file**:
+- Extract only the Chinese text from the bilingual plan (the Chinese portions of each paired `<Chinese text> / <English text>` heading or statement).
+- Section headings, AC labels, task IDs, file paths, API names, and command flags MUST remain unchanged (identifiers are language-neutral).
+- The `_zh` file is a Chinese-only reading view of the same plan; it must not add new information not present in the main file.
+
+If `CHINESE_PLAN_ENABLED=false` (the default), do NOT create the `_zh` file. The absence of `.humanize/config.json` or the absence of the `chinese_plan` field both imply `CHINESE_PLAN_ENABLED=false`; no error is raised.
+
+### Step 5: Optional Direct Work Start
 
 If all of the following are true:
 - `AUTO_START_RLCR_IF_CONVERGED=true`
@@ -511,7 +549,7 @@ If the auto-start command fails, report the failure reason and provide the exact
 /humanize:start-rlcr-loop <output-plan-path>
 ```
 
-### Step 5: Report Results
+### Step 6: Report Results
 
 Report to the user:
 - Path to the generated plan
@@ -520,6 +558,7 @@ Report to the user:
 - Number of convergence rounds executed
 - Number of unresolved user decisions (if any)
 - Language mode used (default bilingual or user-requested single language)
+- Whether a `_zh` Chinese-only variant was written, and its path (or note that `chinese_plan` is not enabled)
 - Whether direct work start was attempted, and its result
 
 ---

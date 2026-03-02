@@ -129,3 +129,19 @@ Each task must include exactly one routing tag:
 - Implementation code and comments must NOT contain plan-specific terminology such as "AC-", "Milestone", "Step", "Phase", or similar workflow markers
 - These terms are for plan documentation only, not for the resulting codebase
 - Use descriptive, domain-appropriate naming in code instead
+
+## Output File Convention
+
+This template is used to produce the main output file (e.g., `plan.md`).
+
+### Chinese-Only Variant (`_zh` file)
+
+When `chinese_plan=true` is set in `.humanize/config.json`, a `_zh` variant of the output file is also written after the main file. The `_zh` filename is constructed by inserting `_zh` immediately before the file extension:
+
+- `plan.md` becomes `plan_zh.md`
+- `docs/my-plan.md` becomes `docs/my-plan_zh.md`
+- `output` (no extension) becomes `output_zh`
+
+The `_zh` file contains only the Chinese portions of the bilingual plan. All identifiers (`AC-*`, task IDs, file paths, API names, command flags) remain unchanged, as they are language-neutral.
+
+When `chinese_plan=false` (the default), or when `.humanize/config.json` does not exist, or when the `chinese_plan` field is absent, the `_zh` file is NOT written. A missing config file is not an error.
