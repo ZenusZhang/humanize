@@ -1,6 +1,10 @@
 # Scratchpad
 temp
 
+# Workflow planning artifacts (not part of plugin source)
+workflow_backlog.md
+plans/
+
 # Humanize state directories (used by start-rlcr-loop)
 .humanize*
 
