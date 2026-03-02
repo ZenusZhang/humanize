@@ -7,8 +7,9 @@ Parses task dependency information from two sources:
   2. A worktree-assignment.md file (Parallelization Matrix table with columns: Task ID, blockedBy)
 
 Provides subcommands:
-  parse  -- Parse and validate the dependency graph; print results to stdout
-  init   -- Lazily initialize task-state.json from the plan task table
+  parse      -- Parse and validate the dependency graph; print results to stdout
+  init       -- Lazily initialize task-state.json from the plan task table
+  reconcile  -- Reconcile task-state.json with the current plan and assignment
 """
 
 import argparse
@@ -423,6 +424,307 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# State read/write helpers
+# ---------------------------------------------------------------------------
+
+
+def read_state(path: str) -> dict:
+    """
+    Read task-state.json (schema v1) from path.
+
+    Returns the parsed dict on success. If the file does not exist, returns
+    an empty dict. If the file contains invalid JSON, prints a WARNING to
+    stderr and returns an empty dict.
+    """
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError as exc:
+        print(f"WARNING: Failed to parse state file '{path}': {exc}", file=sys.stderr)
+        return {}
+
+
+def write_state(state: dict, path: str) -> None:
+    """
+    Atomically write state dict to path.
+
+    Writes to <path>.tmp first, then renames to path to avoid partial writes.
+    """
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+        f.write("\n")
+    os.replace(tmp_path, path)
+
+
+# ---------------------------------------------------------------------------
+# State transition validation
+# ---------------------------------------------------------------------------
+
+# Allowed transitions: map from old_status to the set of permitted new statuses.
+# "deferred" is reachable from any status (handled separately in validate_transition).
+_ALLOWED_TRANSITIONS: dict[str, set[str]] = {
+    "pending": {"ready", "in_progress", "deferred"},
+    "ready": {"in_progress", "deferred"},
+    "in_progress": {"done", "failed", "deferred"},
+    "failed": {"pending", "deferred"},
+    # "done" and "deferred" intentionally have no outgoing allowed transitions
+    # except for deferred which allows deferred->deferred (handled below).
+}
+
+
+def validate_transition(old_status: str, new_status: str) -> bool:
+    """
+    Return True if transitioning from old_status to new_status is permitted.
+
+    Allowed transitions:
+      pending    -> ready, in_progress, deferred
+      ready      -> in_progress, deferred
+      in_progress -> done, failed, deferred
+      failed     -> pending, deferred
+      done       -> (terminal; no transitions allowed)
+      any        -> deferred  (manual coordinator deferral)
+    """
+    if old_status == "done":
+        # done is a terminal state; no transitions allowed from it
+        return False
+    # deferred is reachable from any non-done status
+    if new_status == "deferred":
+        return True
+    allowed = _ALLOWED_TRANSITIONS.get(old_status, set())
+    return new_status in allowed
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: reconcile
+# ---------------------------------------------------------------------------
+
+
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    """
+    Reconcile task-state.json with the current set of tasks from the plan
+    and optional assignment file.
+
+    Logic:
+      1. Parse plan (and assignment if provided) to get the live task ID set.
+      2. Read existing state file (or empty dict if missing).
+      3. For each task in the live set NOT in state: add it as 'pending'.
+      4. For each task in state NOT in the live set: if its status is not
+         already 'deferred' or 'done', set it to 'deferred'.
+      5. Write updated state atomically.
+      6. Print summary: tasks added (pending) and tasks deferred.
+
+    Exit code: 0 always.
+    """
+    plan_deps = parse_plan_file(args.plan)
+
+    assignment_blocked: dict[str, list[str]] = {}
+    if args.assignment:
+        if os.path.isfile(args.assignment):
+            assignment_blocked = parse_assignment_file(args.assignment)
+
+    graph = build_graph(plan_deps, assignment_blocked)
+    live_tasks: set[str] = set(graph.keys())
+
+    state = read_state(args.state)
+
+    # Ensure top-level structure is present
+    if "tasks" not in state:
+        state["tasks"] = {}
+    if "version" not in state:
+        state["version"] = 1
+    if "lane_iterations" not in state:
+        state["lane_iterations"] = {}
+
+    tasks_state: dict[str, dict] = state["tasks"]
+    now_str = _utc_now_iso()
+
+    added_count = 0
+    deferred_count = 0
+
+    # Add tasks that are in the live set but not yet in state
+    for task_id in sorted(live_tasks):
+        if task_id not in tasks_state:
+            tasks_state[task_id] = {
+                "status": "pending",
+                "last_updated": now_str,
+                "reviewer_signoff": False,
+            }
+            added_count += 1
+
+    # Defer tasks that are in state but no longer in the live set
+    for task_id, task_info in tasks_state.items():
+        if task_id not in live_tasks:
+            current_status = task_info.get("status", "pending")
+            if current_status not in ("deferred", "done"):
+                task_info["status"] = "deferred"
+                task_info["last_updated"] = now_str
+                deferred_count += 1
+
+    state["tasks"] = tasks_state
+    write_state(state, args.state)
+
+    print(f"Reconcile complete: {added_count} task(s) added as pending, "
+          f"{deferred_count} task(s) deferred.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Self-verification (invoked when --verify flag is passed to the script)
+# ---------------------------------------------------------------------------
+
+
+def _run_verification() -> None:
+    """
+    Run acceptance tests for read_state, write_state, validate_transition,
+    and the reconcile logic. Prints VERIFICATION PASSED on success or raises
+    AssertionError with a descriptive message on failure.
+    """
+    import tempfile
+
+    failures: list[str] = []
+
+    def check(label: str, condition: bool) -> None:
+        if not condition:
+            failures.append(f"FAIL: {label}")
+
+    # ------------------------------------------------------------------
+    # Test 1: read_state on a non-existent file returns {}
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        missing_path = os.path.join(tmpdir, "nonexistent.json")
+        result = read_state(missing_path)
+        check("read_state non-existent file returns {}", result == {})
+
+    # ------------------------------------------------------------------
+    # Test 2: write_state then read_state round-trips data exactly
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_path = os.path.join(tmpdir, "state.json")
+        original = {
+            "version": 1,
+            "tasks": {
+                "task1": {"status": "pending", "last_updated": "2026-01-01T00:00:00Z",
+                          "reviewer_signoff": False},
+            },
+            "lane_iterations": {},
+        }
+        write_state(original, state_path)
+        loaded = read_state(state_path)
+        check("write_state/read_state round-trip", loaded == original)
+
+    # ------------------------------------------------------------------
+    # Test 3: validate_transition edge cases
+    # ------------------------------------------------------------------
+    check("done -> pending is NOT allowed", not validate_transition("done", "pending"))
+    check("pending -> ready is allowed", validate_transition("pending", "ready"))
+    check("failed -> pending is allowed", validate_transition("failed", "pending"))
+    check("pending -> in_progress is allowed", validate_transition("pending", "in_progress"))
+    check("ready -> in_progress is allowed", validate_transition("ready", "in_progress"))
+    check("in_progress -> done is allowed", validate_transition("in_progress", "done"))
+    check("in_progress -> failed is allowed", validate_transition("in_progress", "failed"))
+    check("any -> deferred: pending -> deferred", validate_transition("pending", "deferred"))
+    check("any -> deferred: ready -> deferred", validate_transition("ready", "deferred"))
+    check("any -> deferred: in_progress -> deferred", validate_transition("in_progress", "deferred"))
+    check("any -> deferred: failed -> deferred", validate_transition("failed", "deferred"))
+    check("done -> deferred is NOT allowed (done is terminal)", not validate_transition("done", "deferred"))
+    check("done -> done is NOT allowed", not validate_transition("done", "done"))
+    check("pending -> failed is NOT allowed", not validate_transition("pending", "failed"))
+
+    # ------------------------------------------------------------------
+    # Test 4: reconcile with existing state (task1=done, task2=pending),
+    # plan adds task3 and removes task2 -> task3 added as pending,
+    # task2 deferred, task1 stays done.
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Write a plan with task1 and task3 (no task2)
+        plan_path = os.path.join(tmpdir, "plan.md")
+        plan_content = (
+            "| Task ID | Depends On |\n"
+            "|---------|------------|\n"
+            "| task1   | -          |\n"
+            "| task3   | task1      |\n"
+        )
+        with open(plan_path, "w", encoding="utf-8") as pf:
+            pf.write(plan_content)
+
+        state_path = os.path.join(tmpdir, "task-state.json")
+        initial_state = {
+            "version": 1,
+            "tasks": {
+                "task1": {"status": "done", "last_updated": "2026-01-01T00:00:00Z",
+                          "reviewer_signoff": True},
+                "task2": {"status": "pending", "last_updated": "2026-01-01T00:00:00Z",
+                          "reviewer_signoff": False},
+            },
+            "lane_iterations": {},
+        }
+        write_state(initial_state, state_path)
+
+        # Simulate reconcile
+        class _Args:
+            pass
+
+        rec_args = _Args()
+        rec_args.plan = plan_path  # type: ignore[attr-defined]
+        rec_args.state = state_path  # type: ignore[attr-defined]
+        rec_args.assignment = None  # type: ignore[attr-defined]
+
+        cmd_reconcile(rec_args)
+
+        final = read_state(state_path)
+        tasks = final.get("tasks", {})
+
+        check("test4: task1 stays done", tasks.get("task1", {}).get("status") == "done")
+        check("test4: task2 becomes deferred", tasks.get("task2", {}).get("status") == "deferred")
+        check("test4: task3 added as pending", tasks.get("task3", {}).get("status") == "pending")
+
+    # ------------------------------------------------------------------
+    # Test 5: reconcile when state file does not exist creates new state
+    # with all tasks as pending.
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        plan_path = os.path.join(tmpdir, "plan.md")
+        plan_content = (
+            "| Task ID | Depends On |\n"
+            "|---------|------------|\n"
+            "| taskA   | -          |\n"
+            "| taskB   | taskA      |\n"
+        )
+        with open(plan_path, "w", encoding="utf-8") as pf:
+            pf.write(plan_content)
+
+        state_path = os.path.join(tmpdir, "task-state.json")
+        # Ensure the file does not exist
+        assert not os.path.isfile(state_path)
+
+        rec_args = _Args()
+        rec_args.plan = plan_path  # type: ignore[attr-defined]
+        rec_args.state = state_path  # type: ignore[attr-defined]
+        rec_args.assignment = None  # type: ignore[attr-defined]
+
+        cmd_reconcile(rec_args)
+
+        check("test5: state file was created", os.path.isfile(state_path))
+        final = read_state(state_path)
+        tasks = final.get("tasks", {})
+        check("test5: taskA is pending", tasks.get("taskA", {}).get("status") == "pending")
+        check("test5: taskB is pending", tasks.get("taskB", {}).get("status") == "pending")
+
+    # ------------------------------------------------------------------
+    # Report
+    # ------------------------------------------------------------------
+    if failures:
+        for msg in failures:
+            print(msg, file=sys.stderr)
+        sys.exit(1)
+    else:
+        print("VERIFICATION PASSED")
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -464,6 +766,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the worktree-assignment.md file (optional).",
     )
 
+    # -- reconcile subcommand --
+    reconcile_parser = subparsers.add_parser(
+        "reconcile",
+        help="Reconcile task-state.json with the current plan and assignment.",
+    )
+    reconcile_parser.add_argument("--plan", required=True, help="Path to the plan Markdown file.")
+    reconcile_parser.add_argument(
+        "--state",
+        default="task-state.json",
+        help="Path to the task-state.json file to reconcile (default: task-state.json).",
+    )
+    reconcile_parser.add_argument(
+        "--assignment",
+        default=None,
+        help="Path to the worktree-assignment.md file (optional).",
+    )
+
     return parser
 
 
@@ -475,10 +794,16 @@ def main() -> int:
         return cmd_parse(args)
     elif args.subcommand == "init":
         return cmd_init(args)
+    elif args.subcommand == "reconcile":
+        return cmd_reconcile(args)
     else:
         print(f"ERROR: Unknown subcommand '{args.subcommand}'", file=sys.stderr)
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Allow --verify flag to run self-verification tests instead of normal CLI
+    if len(sys.argv) == 2 and sys.argv[1] == "--verify":
+        _run_verification()
+    else:
+        sys.exit(main())
