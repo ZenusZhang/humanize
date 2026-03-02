@@ -198,8 +198,10 @@ if [[ "$INCLUDE_BLOCKED" -eq 1 ]]; then
             fi
             if READY_OUTPUT=$(python3 "$TASK_GRAPH_SCRIPT" "${READY_CMD_ARGS[@]}" 2>/dev/null); then
                 READY_TASK_IDS=$(printf '%s' "$READY_OUTPUT" | tr '\n' ' ')
+                # Mark filter active so AWK can annotate non-ready tasks correctly
+                READY_FILTER_ACTIVE=1
             else
-                echo "WARNING: task-graph.py ready failed; skipping readiness check" >&2
+                echo "WARNING: task-graph.py ready failed; blocked annotations will not be applied" >&2
             fi
         fi
     fi
@@ -504,7 +506,20 @@ LANES_OUTPUT=$(
 )
 
 if [[ -z "$LANES_OUTPUT" ]]; then
-    cat << 'EMPTY_EOF'
+    if [[ "$READY_FILTER_ACTIVE" -eq 1 ]]; then
+        # Readiness filtering is active but no tasks are currently ready.
+        # This is a correct state: all tasks have unmet dependencies.
+        cat << 'EMPTY_EOF'
+
+No tasks are currently ready (all dependencies are unmet or the lane cap is reached).
+
+Next:
+1) Check `task-state.json` to see which tasks are `done` vs `pending`
+2) Use `python3 scripts/task-graph.py ready --state <task-state.json>` to debug
+3) Or re-run with `--include-blocked` to see blocked tasks with annotations
+EMPTY_EOF
+    else
+        cat << 'EMPTY_EOF'
 
 No tasks are marked `Parallelizable=yes` in `worktree-assignment.md`.
 
@@ -513,6 +528,7 @@ Next:
 2) Fill `File Ownership` to prevent collisions
 3) Re-run: `/humanize:gen-batch-prompt`
 EMPTY_EOF
+    fi
     exit 0
 fi
 
