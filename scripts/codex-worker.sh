@@ -259,7 +259,7 @@ if [[ "${HUMANIZE_CODEX_BYPASS_SANDBOX:-}" == "true" ]] || [[ "${HUMANIZE_CODEX_
     CODEX_AUTO_FLAG="--dangerously-bypass-approvals-and-sandbox"
 fi
 
-CODEX_EXEC_ARGS+=("$CODEX_AUTO_FLAG" "-C" "$PROJECT_ROOT")
+CODEX_EXEC_ARGS+=("$CODEX_AUTO_FLAG" "-C" "$WORKDIR_ABS")
 
 # ========================================
 # Save Debug Command
@@ -272,7 +272,7 @@ CODEX_STDERR_FILE="$CACHE_DIR/codex-run.log"
 {
     echo "# Codex worker invocation debug info"
     echo "# Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "# Working directory: $PROJECT_ROOT"
+    echo "# Working directory: $WORKDIR_ABS"
     echo "# Workdir argument: $WORKDIR"
     echo "# Timeout: $WORKER_TIMEOUT seconds"
     echo ""
