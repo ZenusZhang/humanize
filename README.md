@@ -171,30 +171,43 @@ RLCR also uses a project-level `bitlesson.md` (in repository root) for reusable 
 
 OPTIONS:
   --plan-file <path>     Explicit plan file path (alternative to positional arg)
+  --track-plan-file      Indicate plan file should be tracked in git (must be clean)
   --max <N>              Maximum iterations before auto-stop (default: 42)
   --codex-model <MODEL:EFFORT>
-                         Codex model and reasoning effort (default: gpt-5.2:xhigh, non-codex)
+                         Codex model and reasoning effort (default: gpt-5.2:xhigh)
   --codex-timeout <SECONDS>
                          Timeout for each Codex review in seconds (default: 5400)
-  --track-plan-file      Indicate plan file should be tracked in git (must be clean)
   --push-every-round     Require git push after each round (default: commits stay local)
   --base-branch <BRANCH> Base branch for code review phase (default: auto-detect)
-                         Auto-detection priority: remote default > main > master
+                         Priority: user input > remote default > main > master
   --full-review-round <N>
                          Interval for Full Alignment Check rounds (default: 5, min: 2)
-  --skip-impl            Skip implementation phase, go directly to code review
+                         Full Alignment Checks occur at rounds N-1, 2N-1, 3N-1, etc.
+  --skip-impl            Skip implementation phase and go directly to code review
                          Plan file is optional when using this flag
-  --agent-teams          Enable Claude Agent Teams mode
-  --no-agent-teams       Disable Agent Teams mode for this loop
-  --worktree-teams       Enable document-centered worktree orchestration via git worktree
-  --no-worktree-teams    Disable worktree orchestration for this loop
-  --worktree-root <PATH> Root directory for generated worktrees
+  --claude-answer-codex
+                         When Codex finds Open Questions, let Claude answer them
+                         directly instead of asking user via AskUserQuestion.
+                         NOT RECOMMENDED: Open Questions usually indicate gaps in
+                         your plan that deserve human clarification. By default,
+                         Claude asks user for clarification, which is preferred.
+  --agent-teams          Enable Claude Code Agent Teams mode for parallel development.
+                         Enabled by default when supported.
+  --no-agent-teams       Disable Agent Teams mode for this loop.
+  --worktree-teams       Enable document-centered worktree orchestration via git worktree.
+                         Enabled by default when Agent Teams is enabled.
+  --no-worktree-teams    Disable worktree orchestration for this loop.
+  --agent-teams requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1.
+  --worktree-teams also requires path canonicalization support
+                         (python3 preferred, or GNU readlink with -f/-m).
+  --worktree-root <PATH>
+                         Root directory for generated worktrees (default: .humanize/worktrees/<loop-timestamp>)
   --allow-empty-bitlesson-none
-                         Allow `Action: none` when `bitlesson.md` has no concrete entries
+                         Allow `Action: none` even if `bitlesson.md` has no concrete entries
                          (default: enabled)
   --require-bitlesson-entry-for-none
-                         Enforce strict mode: round>0 `Action: none` requires concrete
-                         bitlesson entries
+                         Enforce strict mode: in round > 0, `Action: none` requires at least
+                         one concrete lesson entry in `bitlesson.md`
   -h, --help             Show help message
 ```
 
@@ -260,6 +273,7 @@ OPTIONS:
   --auto-start-rlcr-if-converged
             If plan convergence succeeds and no pending user decisions remain,
             skip manual plan review and immediately start RLCR work.
+  -h, --help             Show help message
 
 The gen-plan command transforms rough draft documents into structured implementation plans.
 
