@@ -22,6 +22,9 @@ source "$HOOKS_LIB_DIR/loop-common.sh"
 PROJECT_ROOT=""
 LOOP_DIR=""
 INCLUDE_BLOCKED=0
+MAX_TASKS_PER_LANE=0
+PREFER_SAME_LANE=0
+STRICT_BLOCKEDBY=0
 
 show_help() {
     cat << 'HELP_EOF'
@@ -31,11 +34,21 @@ USAGE:
   /humanize:gen-batch-prompt [OPTIONS]
 
 OPTIONS:
-  --loop-dir <PATH>       Explicit RLCR loop directory (defaults to active loop)
-  --project-root <PATH>   Project root (defaults to git root of CWD)
-  --include-blocked       Include ALL Parallelizable=yes tasks; annotate blocked tasks
-                          with "[BLOCKED: check task-state.json]". Skips readiness check.
-  -h, --help              Show this help message
+  --loop-dir <PATH>         Explicit RLCR loop directory (defaults to active loop)
+  --project-root <PATH>     Project root (defaults to git root of CWD)
+  --include-blocked         Include ALL Parallelizable=yes tasks; annotate blocked tasks
+                            with "[BLOCKED: check task-state.json]". Skips readiness check.
+  --max-tasks-per-lane <N>  Limit the number of tasks output per worker lane to N.
+                            Default: 0 (unlimited). When N > 0, only the first N tasks
+                            per lane are included; excess tasks are silently omitted.
+  --prefer-same-lane        Prefer batching same-lane tasks together. Tasks are already
+                            grouped by lane by default, so this flag is a no-op that
+                            prints an informational message to stderr.
+  --strict-blockedby        Treat tasks with external (non-task-ID) blockedBy values as
+                            hard blockers. Prints an error to stderr for each such task
+                            and (in --include-blocked mode) annotates them with
+                            [STRICT-BLOCKED] instead of [BLOCKED: check task-state.json].
+  -h, --help                Show this help message
 
 NOTES:
   - By default, only tasks in the ready set (from task-graph.py ready) are included.
@@ -74,6 +87,26 @@ while [[ $# -gt 0 ]]; do
             INCLUDE_BLOCKED=1
             shift
             ;;
+        --max-tasks-per-lane)
+            if [[ -z "${2:-}" ]]; then
+                echo "Error: --max-tasks-per-lane requires a numeric argument" >&2
+                exit 1
+            fi
+            if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+                echo "Error: --max-tasks-per-lane value must be a non-negative integer, got: $2" >&2
+                exit 1
+            fi
+            MAX_TASKS_PER_LANE="$2"
+            shift 2
+            ;;
+        --prefer-same-lane)
+            PREFER_SAME_LANE=1
+            shift
+            ;;
+        --strict-blockedby)
+            STRICT_BLOCKEDBY=1
+            shift
+            ;;
         *)
             echo "Error: Unknown option: $1" >&2
             echo "Use --help for usage information." >&2
@@ -81,6 +114,10 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "$PREFER_SAME_LANE" -eq 1 ]]; then
+    echo "INFO: --prefer-same-lane is enabled (tasks already grouped by lane by default)" >&2
+fi
 
 if [[ -z "$PROJECT_ROOT" ]]; then
     local_root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
@@ -186,6 +223,14 @@ else
     fi
 fi
 
+# ---------------------------------------------------------------------------
+# --strict-blockedby: external blockedBy detection and stderr error reporting
+# is delegated entirely to the AWK script below via the strict_blockedby
+# variable. The AWK script calls is_task_id() on each task's blockedBy value
+# and prints ERROR lines to /dev/stderr for any external constraints found.
+# No additional shell-level pre-scan is needed.
+# ---------------------------------------------------------------------------
+
 cat << 'HEADER_EOF'
 # `/batch` Parallel Dispatch (Humanize) / `/batch` 并行分发（Humanize）
 
@@ -217,6 +262,8 @@ LANES_OUTPUT=$(
     awk \
         -v ready_ids="$READY_TASK_IDS" \
         -v blocked_annotation="$BLOCKED_ANNOTATION_ACTIVE" \
+        -v max_tasks_per_lane="$MAX_TASKS_PER_LANE" \
+        -v strict_blockedby="$STRICT_BLOCKEDBY" \
         '
         function trim(text) {
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
@@ -249,6 +296,15 @@ LANES_OUTPUT=$(
                 cells_lc[cell_count] = tolower(cell)
             }
             return cell_count
+        }
+        # Returns 1 if the value looks like a task ID (e.g., task1, task-2, task2a),
+        # returns 0 if it looks like an external constraint.
+        # A dash or empty value is not an external constraint.
+        function is_task_id(val,    lc) {
+            lc = tolower(val)
+            if (lc == "" || lc == "-" || lc == "none" || lc == "n/a") return 1
+            if (lc ~ /^task[0-9a-z._-]+$/) return 1
+            return 0
         }
 
         BEGIN {
@@ -368,6 +424,14 @@ LANES_OUTPUT=$(
             if (blocked == "") blocked = "-"
             if (ownership == "") ownership = "[missing file ownership]"
 
+            # --strict-blockedby: detect external (non-task-ID) blockers and emit
+            # errors to stderr. Also track strict-blocked status for annotation.
+            is_strict_blocked = 0
+            if (strict_blockedby && !is_task_id(blocked)) {
+                print "ERROR: task '" task_id "' blocked by external constraint '" blocked "' (strict mode; resolve before dispatching)" > "/dev/stderr"
+                is_strict_blocked = 1
+            }
+
             if (!(worker in seen_worker)) {
                 worker_count++
                 worker_order[worker_count] = worker
@@ -378,8 +442,19 @@ LANES_OUTPUT=$(
 
             desc = (task_id in plan_desc) ? plan_desc[task_id] : "[missing description in plan]"
 
+            # --max-tasks-per-lane: enforce per-lane task count limit.
+            # Track how many tasks have been recorded for each worker lane.
+            if (max_tasks_per_lane > 0) {
+                worker_task_count[worker]++
+                if (worker_task_count[worker] > max_tasks_per_lane) {
+                    next
+                }
+            }
+
             task_total++
-            if (is_blocked_task) {
+            if (is_strict_blocked && blocked_annotation) {
+                tasks[worker] = tasks[worker] sprintf("- %s: %s (blockedBy: %s; ownership: %s) [STRICT-BLOCKED]\n", task_id, desc, blocked, ownership)
+            } else if (is_blocked_task) {
                 tasks[worker] = tasks[worker] sprintf("- %s: %s (blockedBy: %s; ownership: %s) [BLOCKED: check task-state.json]\n", task_id, desc, blocked, ownership)
             } else {
                 tasks[worker] = tasks[worker] sprintf("- %s: %s (blockedBy: %s; ownership: %s)\n", task_id, desc, blocked, ownership)
