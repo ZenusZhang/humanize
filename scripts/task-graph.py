@@ -7,9 +7,11 @@ Parses task dependency information from two sources:
   2. A worktree-assignment.md file (Parallelization Matrix table with columns: Task ID, blockedBy)
 
 Provides subcommands:
-  parse      -- Parse and validate the dependency graph; print results to stdout
-  init       -- Lazily initialize task-state.json from the plan task table
-  reconcile  -- Reconcile task-state.json with the current plan and assignment
+  parse          -- Parse and validate the dependency graph; print results to stdout
+  init           -- Lazily initialize task-state.json from the plan task table
+  reconcile      -- Reconcile task-state.json with the current plan and assignment
+  increment-lane -- Increment the iteration count for a lane; print escalation if cap reached
+  reset-lane     -- Reset the iteration count for a lane to 0
 """
 
 import argparse
@@ -572,6 +574,155 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Lane iteration tracking helpers
+# ---------------------------------------------------------------------------
+
+
+def get_lane_count(state: dict, lane: str) -> int:
+    """
+    Return the current iteration count for the given lane.
+
+    Returns 0 if the lane is not present in lane_iterations.
+    """
+    lane_iterations: dict = state.get("lane_iterations", {})
+    lane_info: dict = lane_iterations.get(lane, {})
+    return lane_info.get("count", 0)
+
+
+def get_lane_max(state: dict, lane: str, default_max: int = 5) -> int:
+    """
+    Return the configured max iterations for the given lane.
+
+    Falls back to default_max if the lane is not present or has no 'max' set.
+    """
+    lane_iterations: dict = state.get("lane_iterations", {})
+    lane_info: dict = lane_iterations.get(lane, {})
+    return lane_info.get("max", default_max)
+
+
+def is_lane_at_cap(state: dict, lane: str, default_max: int = 5) -> bool:
+    """
+    Return True if the lane's iteration count has reached or exceeded its max.
+    """
+    count = get_lane_count(state, lane)
+    max_count = get_lane_max(state, lane, default_max)
+    return count >= max_count
+
+
+def format_escalation_message(lane: str, count: int, max_count: int, task_ids: list[str]) -> str:
+    """
+    Return a human-readable escalation message for a lane that has reached its
+    iteration cap.
+
+    The message includes the lane name, iteration count/max, the task IDs
+    associated with the lane, and a suggestion to re-scope or re-plan.
+    """
+    tasks_str = ", ".join(task_ids) if task_ids else "(none)"
+    return (
+        f"ESCALATION: Lane '{lane}' has reached the iteration cap ({count}/{max_count}).\n"
+        f"Tasks in this lane: {tasks_str}\n"
+        f"Action required: re-scope or re-plan the above tasks before continuing."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: increment-lane
+# ---------------------------------------------------------------------------
+
+
+def cmd_increment_lane(args: argparse.Namespace) -> int:
+    """
+    Increment the iteration count for a lane in task-state.json.
+
+    If --max N is provided, validates N >= 1 and sets/updates the max for the lane.
+    If --tasks is provided, sets/updates the tasks list for the lane.
+    After incrementing, if count >= max, prints the escalation message to stdout
+    and prints 'LANE_CAP_REACHED' on a separate line.
+
+    Exit code: 0 always (except when --max is invalid, which exits with 1).
+    """
+    # Validate --max if provided
+    if args.max is not None and args.max < 1:
+        print("ERROR: lane_max_iterations must be >= 1", file=sys.stderr)
+        return 1
+
+    state = read_state(args.state)
+
+    # Ensure top-level structure is present
+    if "version" not in state:
+        state["version"] = 1
+    if "tasks" not in state:
+        state["tasks"] = {}
+    if "lane_iterations" not in state:
+        state["lane_iterations"] = {}
+
+    lane_iterations: dict = state["lane_iterations"]
+    if args.lane not in lane_iterations:
+        lane_iterations[args.lane] = {"count": 0, "max": 5, "tasks": []}
+
+    lane_info: dict = lane_iterations[args.lane]
+
+    # Update max if provided
+    if args.max is not None:
+        lane_info["max"] = args.max
+
+    # Update tasks list if provided
+    if args.tasks is not None:
+        lane_info["tasks"] = [t.strip() for t in args.tasks.split(",") if t.strip()]
+
+    # Increment count
+    lane_info["count"] = lane_info.get("count", 0) + 1
+
+    write_state(state, args.state)
+
+    current_count: int = lane_info["count"]
+    current_max: int = lane_info.get("max", 5)
+    current_tasks: list[str] = lane_info.get("tasks", [])
+
+    if current_count >= current_max:
+        msg = format_escalation_message(args.lane, current_count, current_max, current_tasks)
+        print(msg)
+        print("LANE_CAP_REACHED")
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: reset-lane
+# ---------------------------------------------------------------------------
+
+
+def cmd_reset_lane(args: argparse.Namespace) -> int:
+    """
+    Reset the iteration count for a lane to 0 in task-state.json.
+
+    Preserves the existing 'max' and 'tasks' values for the lane.
+
+    Exit code: 0 always.
+    """
+    state = read_state(args.state)
+
+    # Ensure top-level structure is present
+    if "version" not in state:
+        state["version"] = 1
+    if "tasks" not in state:
+        state["tasks"] = {}
+    if "lane_iterations" not in state:
+        state["lane_iterations"] = {}
+
+    lane_iterations: dict = state["lane_iterations"]
+    if args.lane not in lane_iterations:
+        lane_iterations[args.lane] = {"count": 0, "max": 5, "tasks": []}
+    else:
+        lane_iterations[args.lane]["count"] = 0
+
+    write_state(state, args.state)
+
+    print(f"Lane '{args.lane}' iteration count reset to 0.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Self-verification (invoked when --verify flag is passed to the script)
 # ---------------------------------------------------------------------------
 
@@ -579,8 +730,8 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
 def _run_verification() -> None:
     """
     Run acceptance tests for read_state, write_state, validate_transition,
-    and the reconcile logic. Prints VERIFICATION PASSED on success or raises
-    AssertionError with a descriptive message on failure.
+    reconcile logic, and lane iteration tracking. Prints VERIFICATION PASSED
+    on success or raises AssertionError with a descriptive message on failure.
     """
     import tempfile
 
@@ -714,6 +865,188 @@ def _run_verification() -> None:
         check("test5: taskB is pending", tasks.get("taskB", {}).get("status") == "pending")
 
     # ------------------------------------------------------------------
+    # Test 6: get_lane_count on empty state returns 0
+    # ------------------------------------------------------------------
+    empty_state: dict = {}
+    check("get_lane_count on empty state returns 0", get_lane_count(empty_state, "worker-1") == 0)
+
+    state_no_lane: dict = {"lane_iterations": {}}
+    check(
+        "get_lane_count on state with no lane entry returns 0",
+        get_lane_count(state_no_lane, "worker-1") == 0,
+    )
+
+    # ------------------------------------------------------------------
+    # Test 7: increment-lane reaches cap after 5 increments (default max=5)
+    # and prints LANE_CAP_REACHED
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_path = os.path.join(tmpdir, "task-state.json")
+
+        class _Args:
+            pass
+
+        for i in range(4):
+            inc_args = _Args()
+            inc_args.lane = "worker-1"  # type: ignore[attr-defined]
+            inc_args.state = state_path  # type: ignore[attr-defined]
+            inc_args.max = None  # type: ignore[attr-defined]
+            inc_args.tasks = None  # type: ignore[attr-defined]
+            ret = cmd_increment_lane(inc_args)
+            check(f"increment-lane iteration {i+1} returns 0", ret == 0)
+
+        # 5th increment should reach cap
+        import io
+        from contextlib import redirect_stdout
+
+        inc_args5 = _Args()
+        inc_args5.lane = "worker-1"  # type: ignore[attr-defined]
+        inc_args5.state = state_path  # type: ignore[attr-defined]
+        inc_args5.max = None  # type: ignore[attr-defined]
+        inc_args5.tasks = None  # type: ignore[attr-defined]
+
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            ret5 = cmd_increment_lane(inc_args5)
+        output5 = captured.getvalue()
+
+        check("increment-lane 5th increment returns 0", ret5 == 0)
+        check("increment-lane 5th increment prints LANE_CAP_REACHED", "LANE_CAP_REACHED" in output5)
+        check(
+            "increment-lane 5th increment prints ESCALATION",
+            "ESCALATION" in output5,
+        )
+
+        final_state = read_state(state_path)
+        check(
+            "increment-lane count is 5 after 5 increments",
+            get_lane_count(final_state, "worker-1") == 5,
+        )
+        check(
+            "is_lane_at_cap returns True after 5 increments",
+            is_lane_at_cap(final_state, "worker-1") is True,
+        )
+
+    # ------------------------------------------------------------------
+    # Test 8: increment-lane with --max 3 reaches cap after 3 increments
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_path = os.path.join(tmpdir, "task-state.json")
+
+        for i in range(2):
+            inc_args = _Args()
+            inc_args.lane = "lane-x"  # type: ignore[attr-defined]
+            inc_args.state = state_path  # type: ignore[attr-defined]
+            inc_args.max = 3  # type: ignore[attr-defined]
+            inc_args.tasks = None  # type: ignore[attr-defined]
+            cmd_increment_lane(inc_args)
+
+        inc_args3 = _Args()
+        inc_args3.lane = "lane-x"  # type: ignore[attr-defined]
+        inc_args3.state = state_path  # type: ignore[attr-defined]
+        inc_args3.max = 3  # type: ignore[attr-defined]
+        inc_args3.tasks = None  # type: ignore[attr-defined]
+
+        captured3 = io.StringIO()
+        with redirect_stdout(captured3):
+            cmd_increment_lane(inc_args3)
+        output3 = captured3.getvalue()
+
+        check(
+            "increment-lane --max 3 prints LANE_CAP_REACHED on 3rd increment",
+            "LANE_CAP_REACHED" in output3,
+        )
+        s3 = read_state(state_path)
+        check(
+            "increment-lane --max 3 count is 3 after 3 increments",
+            get_lane_count(s3, "lane-x") == 3,
+        )
+        check(
+            "is_lane_at_cap with max=3 returns True after 3 increments",
+            is_lane_at_cap(s3, "lane-x", default_max=3) is True,
+        )
+
+    # ------------------------------------------------------------------
+    # Test 9: reset-lane resets count to 0
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_path = os.path.join(tmpdir, "task-state.json")
+
+        # Increment twice first
+        for _ in range(2):
+            inc_args = _Args()
+            inc_args.lane = "worker-2"  # type: ignore[attr-defined]
+            inc_args.state = state_path  # type: ignore[attr-defined]
+            inc_args.max = None  # type: ignore[attr-defined]
+            inc_args.tasks = None  # type: ignore[attr-defined]
+            cmd_increment_lane(inc_args)
+
+        pre_reset = read_state(state_path)
+        check(
+            "reset-lane pre-condition: count is 2",
+            get_lane_count(pre_reset, "worker-2") == 2,
+        )
+
+        reset_args = _Args()
+        reset_args.lane = "worker-2"  # type: ignore[attr-defined]
+        reset_args.state = state_path  # type: ignore[attr-defined]
+        ret_reset = cmd_reset_lane(reset_args)
+
+        check("reset-lane returns 0", ret_reset == 0)
+        post_reset = read_state(state_path)
+        check(
+            "reset-lane resets count to 0",
+            get_lane_count(post_reset, "worker-2") == 0,
+        )
+        # max must be preserved
+        check(
+            "reset-lane preserves max",
+            get_lane_max(post_reset, "worker-2") == 5,
+        )
+
+    # ------------------------------------------------------------------
+    # Test 10: increment-lane --max 0 exits with code 1
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmpdir:
+        state_path = os.path.join(tmpdir, "task-state.json")
+        bad_args = _Args()
+        bad_args.lane = "worker-1"  # type: ignore[attr-defined]
+        bad_args.state = state_path  # type: ignore[attr-defined]
+        bad_args.max = 0  # type: ignore[attr-defined]
+        bad_args.tasks = None  # type: ignore[attr-defined]
+        ret_bad = cmd_increment_lane(bad_args)
+        check("increment-lane --max 0 exits with code 1", ret_bad == 1)
+
+        neg_args = _Args()
+        neg_args.lane = "worker-1"  # type: ignore[attr-defined]
+        neg_args.state = state_path  # type: ignore[attr-defined]
+        neg_args.max = -3  # type: ignore[attr-defined]
+        neg_args.tasks = None  # type: ignore[attr-defined]
+        ret_neg = cmd_increment_lane(neg_args)
+        check("increment-lane --max -3 exits with code 1", ret_neg == 1)
+
+    # ------------------------------------------------------------------
+    # Test 11: format_escalation_message contains required fields
+    # ------------------------------------------------------------------
+    msg = format_escalation_message("worker-1", 5, 5, ["task1", "task2"])
+    check(
+        "format_escalation_message contains lane name",
+        "worker-1" in msg,
+    )
+    check(
+        "format_escalation_message contains count/max",
+        "5/5" in msg,
+    )
+    check(
+        "format_escalation_message contains task IDs",
+        "task1" in msg and "task2" in msg,
+    )
+    check(
+        "format_escalation_message contains re-scope or re-plan",
+        "re-scope or re-plan" in msg,
+    )
+
+    # ------------------------------------------------------------------
     # Report
     # ------------------------------------------------------------------
     if failures:
@@ -783,6 +1116,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the worktree-assignment.md file (optional).",
     )
 
+    # -- increment-lane subcommand --
+    inc_parser = subparsers.add_parser(
+        "increment-lane",
+        help="Increment the iteration count for a lane; print escalation message if cap is reached.",
+    )
+    inc_parser.add_argument("lane", help="Name of the lane to increment.")
+    inc_parser.add_argument(
+        "--state",
+        default="task-state.json",
+        help="Path to the task-state.json file (default: task-state.json).",
+    )
+    inc_parser.add_argument(
+        "--max",
+        type=int,
+        default=None,
+        help="Set/update the maximum iterations for this lane (must be >= 1).",
+    )
+    inc_parser.add_argument(
+        "--tasks",
+        default=None,
+        help="Comma-separated list of task IDs to associate with this lane.",
+    )
+
+    # -- reset-lane subcommand --
+    reset_parser = subparsers.add_parser(
+        "reset-lane",
+        help="Reset the iteration count for a lane to 0 (preserves max and tasks).",
+    )
+    reset_parser.add_argument("lane", help="Name of the lane to reset.")
+    reset_parser.add_argument(
+        "--state",
+        default="task-state.json",
+        help="Path to the task-state.json file (default: task-state.json).",
+    )
+
     return parser
 
 
@@ -796,6 +1164,10 @@ def main() -> int:
         return cmd_init(args)
     elif args.subcommand == "reconcile":
         return cmd_reconcile(args)
+    elif args.subcommand == "increment-lane":
+        return cmd_increment_lane(args)
+    elif args.subcommand == "reset-lane":
+        return cmd_reset_lane(args)
     else:
         print(f"ERROR: Unknown subcommand '{args.subcommand}'", file=sys.stderr)
         return 1
