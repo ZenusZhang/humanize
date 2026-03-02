@@ -2127,7 +2127,7 @@ if [[ "$WORKTREE_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]]; then
     WORKTREE_TEAMS_CONTINUE=$(load_template "$TEMPLATE_DIR" "claude/worktree-teams-continue.md" 2>/dev/null)
     if [[ -n "$WORKTREE_TEAMS_CONTINUE" ]]; then
         # Keep next-round prompts compact for modern flows: drop the heading before appending.
-        WORKTREE_TEAMS_CONTINUE_BODY=$(printf '%s\n' "$WORKTREE_TEAMS_CONTINUE" | sed '1{/^##[[:space:]]\+Worktree Teams Continuation[[:space:]]*$/d;}')
+        WORKTREE_TEAMS_CONTINUE_BODY=$(printf '%s\n' "$WORKTREE_TEAMS_CONTINUE" | sed -E '1{/^##[[:space:]]+Worktree Teams Continuation[[:space:]]*$/d;}')
         if [[ -n "$WORKTREE_TEAMS_CONTINUE_BODY" ]]; then
             echo "" >> "$NEXT_PROMPT_FILE"
             echo "$WORKTREE_TEAMS_CONTINUE_BODY" >> "$NEXT_PROMPT_FILE"
