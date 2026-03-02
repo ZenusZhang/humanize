@@ -100,17 +100,21 @@ def parse_plan_file(path: str) -> dict[str, list[str]]:
     Returns a dict mapping each task ID to its list of declared dependencies.
     Returns an empty dict if no matching table is found.
 
-    Raises SystemExit with a clear error message if the file is missing or
-    unreadable, so callers always get a predictable failure rather than a
-    raw Python stack trace.
+    Raises SystemExit with a clear error message if the file is missing,
+    unreadable, or otherwise inaccessible, so callers always get a predictable
+    failure rather than a raw Python stack trace.
     """
     if not os.path.isfile(path):
         print(f"ERROR: plan file not found or not readable: '{path}'", file=sys.stderr)
         sys.exit(1)
     deps: dict[str, list[str]] = {}
 
-    with open(path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError as exc:
+        print(f"ERROR: plan file not found or not readable: '{path}': {exc}", file=sys.stderr)
+        sys.exit(1)
 
     i = 0
     while i < len(lines):
@@ -409,7 +413,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     overwriting. Otherwise, write a new state file with all tasks set to
     'pending', using atomic write (tmp -> rename).
 
-    Exit code: 0 always.
+    Exit code: 0 on success; 1 if an explicitly specified --assignment file
+    is missing or unreadable.
     """
     state_path = args.state
 
@@ -547,7 +552,8 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
       5. Write updated state atomically.
       6. Print summary: tasks added (pending) and tasks deferred.
 
-    Exit code: 0 always.
+    Exit code: 0 on success; 1 if an explicitly specified --assignment file
+    is missing or unreadable.
     """
     plan_deps = parse_plan_file(args.plan)
 

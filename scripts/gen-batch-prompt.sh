@@ -316,10 +316,13 @@ LANES_OUTPUT=$(
         }
         # Returns 1 if every non-empty comma-separated token in val looks like a
         # task ID (or a placeholder like "-").  Handles "task1, task2" correctly.
-        function all_task_ids(val,    parts, n, i) {
+        # Backtick-wrapped tokens (e.g., `task1`) are stripped before the check so
+        # that Markdown-formatted IDs are not misclassified as external blockers.
+        function all_task_ids(val,    parts, n, i, tok) {
             n = split(val, parts, /[,[:space:]]+/)
             for (i = 1; i <= n; i++) {
-                if (parts[i] != "" && !is_task_id(parts[i])) return 0
+                tok = strip_ticks(parts[i])
+                if (tok != "" && !is_task_id(tok)) return 0
             }
             return 1
         }
@@ -416,12 +419,14 @@ LANES_OUTPUT=$(
 
             if (mat_task_col == 0 || mat_parallel_col == 0) next
 
-            task_id = trim(cells_raw[mat_task_col])
+            task_id = strip_ticks(cells_raw[mat_task_col])
             parallel = tolower(trim(cells_raw[mat_parallel_col]))
             if (parallel != "yes") next
 
             # Readiness filter: when use_ready_filter is active and task is not ready,
             # either skip it (default) or annotate it (--include-blocked mode).
+            # task_id is already backtick-stripped (via strip_ticks above) to match
+            # the normalized IDs emitted by task-graph.py ready.
             is_blocked_task = 0
             if (use_ready_filter && !(task_id in ready_set)) {
                 if (blocked_annotation) {
