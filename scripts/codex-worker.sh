@@ -211,13 +211,11 @@ find_humanize_project_root() {
 find_active_loop_for_marker() {
     local project_root="$1"
     local loop_base="$project_root/.humanize/rlcr"
-    local loop_dir=""
     local candidate=""
 
     if [[ -n "${LOOP_DIR_ENV:-}" ]]; then
-        loop_dir="$LOOP_DIR_ENV"
-        if [[ -f "$loop_dir/state.md" ]] && [[ ! -f "$loop_dir/cancel-state.md" ]] && [[ ! -f "$loop_dir/finalize-state.md" ]]; then
-            echo "$loop_dir"
+        if [[ -f "${LOOP_DIR_ENV}/state.md" ]] && [[ ! -f "${LOOP_DIR_ENV}/cancel-state.md" ]] && [[ ! -f "${LOOP_DIR_ENV}/finalize-state.md" ]]; then
+            echo "$LOOP_DIR_ENV"
         fi
         return 0
     fi

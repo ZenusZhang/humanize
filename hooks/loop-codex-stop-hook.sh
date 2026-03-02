@@ -122,7 +122,64 @@ CODEX_REVIEW_EFFORT="high"
 CODEX_TIMEOUT="${STATE_CODEX_TIMEOUT:-${CODEX_TIMEOUT:-$DEFAULT_CODEX_TIMEOUT}}"
 ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-false}"
 AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
-
+WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
+WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
+WORKTREE_ROOT_SAFE="$WORKTREE_ROOT"
+if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
+    # Normalize: strip leading ./, collapse duplicate slashes, strip trailing slash
+    while [[ "$WORKTREE_ROOT_SAFE" == ./* ]]; do
+        WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE#./}"
+    done
+    while [[ "$WORKTREE_ROOT_SAFE" == *"//"* ]]; do
+        WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE//\/\//\/}"
+    done
+    WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE%/}"
+    # Validate: reject unsafe paths (normalization may have emptied the value)
+    if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
+        if [[ ! "$WORKTREE_ROOT_SAFE" =~ ^[a-zA-Z0-9._/-]+$ ]] || \
+           [[ "$WORKTREE_ROOT_SAFE" = /* ]] || \
+           [[ "$WORKTREE_ROOT_SAFE" =~ (^|/)\.\.(/|$) ]] || \
+           [[ "$WORKTREE_ROOT_SAFE" == "." ]] || \
+           [[ "$WORKTREE_ROOT_SAFE" == ".git" ]] || \
+           [[ "$WORKTREE_ROOT_SAFE" == .git/* ]]; then
+            # Ignore malformed/unsafe state values rather than injecting untrusted content into prompts
+            WORKTREE_ROOT_SAFE=""
+        fi
+    fi
+fi
+DELEGATION_ENFORCEMENT="${STATE_DELEGATION_ENFORCEMENT:-warn}"
+BITLESSON_REQUIRED="false"
+if [[ -n "$RAW_BITLESSON_REQUIRED" ]]; then
+    BITLESSON_REQUIRED=$(echo "$RAW_BITLESSON_REQUIRED" | sed 's/^bitlesson_required:[[:space:]]*//' | tr -d ' "')
+fi
+BITLESSON_FILE_REL="bitlesson.md"
+if [[ -n "$RAW_BITLESSON_FILE" ]]; then
+    BITLESSON_FILE_REL=$(echo "$RAW_BITLESSON_FILE" | sed 's/^bitlesson_file:[[:space:]]*//' | sed 's/^"//; s/"$//')
+fi
+if [[ -z "$BITLESSON_FILE_REL" ]] || \
+   [[ ! "$BITLESSON_FILE_REL" =~ ^[a-zA-Z0-9._/-]+$ ]] || \
+   [[ "$BITLESSON_FILE_REL" = /* ]] || \
+   [[ "$BITLESSON_FILE_REL" =~ (^|/)\.\.(/|$) ]]; then
+    BITLESSON_FILE_REL="bitlesson.md"
+fi
+BITLESSON_FILE="$PROJECT_ROOT/$BITLESSON_FILE_REL"
+if [[ "$BITLESSON_REQUIRED" != "true" && -f "$BITLESSON_FILE" ]]; then
+    BITLESSON_REQUIRED="true"
+fi
+BITLESSON_ALLOW_EMPTY_NONE="true"
+if [[ -n "$RAW_BITLESSON_ALLOW_EMPTY_NONE" ]]; then
+    BITLESSON_ALLOW_EMPTY_NONE=$(echo "$RAW_BITLESSON_ALLOW_EMPTY_NONE" | sed 's/^bitlesson_allow_empty_none:[[:space:]]*//' | tr -d ' "')
+fi
+if [[ "${HUMANIZE_ALLOW_EMPTY_BITLESSON_NONE:-}" == "true" ]]; then
+    BITLESSON_ALLOW_EMPTY_NONE="true"
+fi
+if [[ "$BITLESSON_ALLOW_EMPTY_NONE" != "true" && "$BITLESSON_ALLOW_EMPTY_NONE" != "false" ]]; then
+    BITLESSON_ALLOW_EMPTY_NONE="true"
+fi
+if [[ "$DELEGATION_ENFORCEMENT" != "warn" && "$DELEGATION_ENFORCEMENT" != "strict" ]]; then
+    echo "Warning: Invalid delegation_enforcement value '$DELEGATION_ENFORCEMENT' in state file; defaulting to warn" >&2
+    DELEGATION_ENFORCEMENT="warn"
+fi
 # Re-validate Codex Model and Effort for YAML safety (in case state.md was manually edited)
 # Use same validation patterns as setup-rlcr-loop.sh
 if [[ ! "$CODEX_EXEC_MODEL" =~ ^[a-zA-Z0-9._-]+$ ]]; then
