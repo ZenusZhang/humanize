@@ -370,7 +370,7 @@ append_parallelization_matrix() {
     echo "" >> "$ASSIGNMENT_FILE"
     echo "## Parallelization Matrix" >> "$ASSIGNMENT_FILE"
     echo "" >> "$ASSIGNMENT_FILE"
-    echo "Default values are scaffolded automatically. Update `Parallelizable (yes/no)` and ownership before implementation." >> "$ASSIGNMENT_FILE"
+    echo 'Default values are scaffolded automatically. Update `Parallelizable (yes/no)` and ownership before implementation.' >> "$ASSIGNMENT_FILE"
     echo "" >> "$ASSIGNMENT_FILE"
     echo "| Task ID | Parallelizable (yes/no) | Reason | File Ownership | blockedBy | Worker | Reviewer | Worktree Path |" >> "$ASSIGNMENT_FILE"
     echo "|---------|--------------------------|--------|----------------|-----------|--------|----------|---------------|" >> "$ASSIGNMENT_FILE"
