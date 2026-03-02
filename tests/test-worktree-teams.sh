@@ -604,15 +604,15 @@ set -e
 
 NEXT_PROMPT="$LOOP_DIR/round-4-prompt.md"
 if [[ -f "$NEXT_PROMPT" ]]; then
-    if ! grep -qi "Worktree Teams Continuation" "$NEXT_PROMPT"; then
-        pass "stop hook does not re-inject worktree continuation template in implementation phase"
+    if grep -q "Keep using document-centered worktree orchestration" "$NEXT_PROMPT"; then
+        pass "stop hook injects worktree continuation template body in implementation phase"
     else
-        fail "stop hook does not re-inject worktree continuation template in implementation phase" "no Worktree Teams Continuation text" "found"
+        fail "stop hook injects worktree continuation template body in implementation phase" "continuation template body text" "not found"
     fi
-    if ! grep -q "Current worktree root from state" "$NEXT_PROMPT"; then
-        pass "stop hook does not echo worktree_root state in implementation phase prompt"
+    if grep -q "Worktree root (state, sanitized):" "$NEXT_PROMPT"; then
+        pass "stop hook includes sanitized worktree_root state in implementation phase prompt"
     else
-        fail "stop hook does not echo worktree_root state in implementation phase prompt" "no worktree_root state echo" "found"
+        fail "stop hook includes sanitized worktree_root state in implementation phase prompt" "sanitized worktree_root state line" "not found"
     fi
     if grep -qi "Below is Codex's review result" "$NEXT_PROMPT"; then
         pass "implementation-phase prompt still includes review feedback section"
@@ -682,10 +682,10 @@ set -e
 
 NEXT_PROMPT="$LOOP_DIR/round-4-prompt.md"
 if [[ -f "$NEXT_PROMPT" ]]; then
-    if ! grep -q "Current worktree root from state" "$NEXT_PROMPT"; then
+    if ! grep -q "Worktree root (state, sanitized):" "$NEXT_PROMPT"; then
         pass "stop hook skips malformed worktree_root values from state"
     else
-        fail "stop hook skips malformed worktree_root values from state" "no worktree_root state echo" "found malformed root echo in prompt"
+        fail "stop hook skips malformed worktree_root values from state" "no sanitized worktree_root state line" "found malformed root echo in prompt"
     fi
 else
     fail "round-4 prompt exists for malformed worktree_root test" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
@@ -710,10 +710,10 @@ set -e
 
 NEXT_PROMPT="$LOOP_DIR/round-4-prompt.md"
 if [[ -f "$NEXT_PROMPT" ]]; then
-    if ! grep -q "Current worktree root from state" "$NEXT_PROMPT"; then
+    if ! grep -q "Worktree root (state, sanitized):" "$NEXT_PROMPT"; then
         pass "stop hook skips absolute worktree_root values from state"
     else
-        fail "stop hook skips absolute worktree_root values from state" "no absolute worktree_root state echo" "found absolute root echo in prompt"
+        fail "stop hook skips absolute worktree_root values from state" "no sanitized absolute worktree_root state line" "found absolute root echo in prompt"
     fi
 else
     fail "round-4 prompt exists for absolute worktree_root test" "round-4-prompt.md exists" "not found (hook exit=$HOOK_EXIT)"
@@ -807,6 +807,55 @@ if echo "$WORKER_OUTPUT" | grep -q "Worker completed"; then
     pass "codex-worker returns mock codex output after marker creation"
 else
     fail "codex-worker returns mock codex output after marker creation" "Worker completed in stdout" "$WORKER_OUTPUT"
+fi
+
+# ========================================
+# Test: codex-worker does not create marker outside active loop
+# ========================================
+
+setup_test_dir
+NOLOOP_DIR="$TEST_DIR/project"
+init_test_git_repo "$NOLOOP_DIR"
+mkdir -p "$NOLOOP_DIR/.humanize/rlcr"
+
+mkdir -p "$TEST_DIR/bin"
+cat > "$TEST_DIR/bin/codex" << 'MOCK_EOF'
+#!/bin/bash
+if [[ "$1" == "exec" ]]; then
+    cat > /dev/null
+    echo "Worker completed"
+    exit 0
+fi
+echo "Unexpected command: $*" >&2
+exit 1
+MOCK_EOF
+chmod +x "$TEST_DIR/bin/codex"
+
+set +e
+WORKER_OUTPUT=$(
+    cd "$NOLOOP_DIR" && \
+    PATH="$TEST_DIR/bin:$PATH" XDG_CACHE_HOME="$TEST_DIR/.cache" \
+        bash "$CODEX_WORKER_SCRIPT" "Implement outside-loop marker behavior test"
+)
+WORKER_EXIT=$?
+set -e
+
+if [[ "$WORKER_EXIT" -eq 0 ]]; then
+    pass "codex-worker succeeds with mock codex exec outside active loop"
+else
+    fail "codex-worker succeeds with mock codex exec outside active loop" "exit 0" "exit $WORKER_EXIT"
+fi
+
+if [[ -z "$(find "$NOLOOP_DIR/.humanize/rlcr" -name '.worker-invoked-round-*' -print 2>/dev/null)" ]]; then
+    pass "codex-worker does not create .worker-invoked-round marker outside active loop"
+else
+    fail "codex-worker does not create .worker-invoked-round marker outside active loop" "no .worker-invoked-round-* files" "$(find "$NOLOOP_DIR/.humanize/rlcr" -name '.worker-invoked-round-*' -print 2>/dev/null | tr '\n' ' ')"
+fi
+
+if echo "$WORKER_OUTPUT" | grep -q "Worker completed"; then
+    pass "codex-worker returns mock codex output outside active loop"
+else
+    fail "codex-worker returns mock codex output outside active loop" "Worker completed in stdout" "$WORKER_OUTPUT"
 fi
 
 # ========================================
