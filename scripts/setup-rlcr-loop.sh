@@ -133,6 +133,7 @@ EXAMPLES:
   /humanize:start-rlcr-loop docs/impl.md --max 20
   /humanize:start-rlcr-loop plan.md --codex-model gpt-5.2:xhigh
   /humanize:start-rlcr-loop plan.md --codex-timeout 7200  # 2 hour timeout
+  /humanize:start-rlcr-loop plan.md --agent-teams --worktree-teams
   /humanize:start-rlcr-loop plan.md
   /humanize:start-rlcr-loop plan.md --no-worktree-teams
   /humanize:start-rlcr-loop plan.md --no-agent-teams

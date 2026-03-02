@@ -122,6 +122,27 @@ ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-false}"
 AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
 WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
 WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
+WORKTREE_ROOT_SAFE="$WORKTREE_ROOT"
+if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
+    while [[ "$WORKTREE_ROOT_SAFE" == ./* ]]; do
+        WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE#./}"
+    done
+    while [[ "$WORKTREE_ROOT_SAFE" == *"//"* ]]; do
+        WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE//\/\//\/}"
+    done
+    WORKTREE_ROOT_SAFE="${WORKTREE_ROOT_SAFE%/}"
+fi
+if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
+    if [[ ! "$WORKTREE_ROOT_SAFE" =~ ^[a-zA-Z0-9._/-]+$ ]] || \
+       [[ "$WORKTREE_ROOT_SAFE" = /* ]] || \
+       [[ "$WORKTREE_ROOT_SAFE" =~ (^|/)\.\.(/|$) ]] || \
+       [[ "$WORKTREE_ROOT_SAFE" == "." ]] || \
+       [[ "$WORKTREE_ROOT_SAFE" == ".git" ]] || \
+       [[ "$WORKTREE_ROOT_SAFE" == .git/* ]]; then
+        # Ignore malformed/unsafe state values rather than injecting untrusted content into prompts
+        WORKTREE_ROOT_SAFE=""
+    fi
+fi
 BITLESSON_REQUIRED="false"
 if [[ -n "$RAW_BITLESSON_REQUIRED" ]]; then
     BITLESSON_REQUIRED=$(echo "$RAW_BITLESSON_REQUIRED" | sed 's/^bitlesson_required:[[:space:]]*//' | tr -d ' "')
@@ -2052,9 +2073,28 @@ if [[ -z "$GOAL_UPDATE_REQUEST" ]]; then
 fi
 echo "$GOAL_UPDATE_REQUEST" >> "$NEXT_PROMPT_FILE"
 
-# Keep next-round prompts compact in teams modes.
-# Worktree coordination should be driven by plan/goal-tracker/worktree-assignment docs,
-# not by re-injecting large continuation templates every round.
+# Add worktree orchestration continuation guidance when enabled
+if [[ "$WORKTREE_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]]; then
+    WORKTREE_TEAMS_CONTINUE=$(load_template "$TEMPLATE_DIR" "claude/worktree-teams-continue.md" 2>/dev/null)
+    if [[ -n "$WORKTREE_TEAMS_CONTINUE" ]]; then
+        # Keep next-round prompts compact for modern flows: drop the heading before appending.
+        WORKTREE_TEAMS_CONTINUE_BODY=$(printf '%s\n' "$WORKTREE_TEAMS_CONTINUE" | sed '1{/^##[[:space:]]\+Worktree Teams Continuation[[:space:]]*$/d;}')
+        if [[ -n "$WORKTREE_TEAMS_CONTINUE_BODY" ]]; then
+            echo "" >> "$NEXT_PROMPT_FILE"
+            echo "$WORKTREE_TEAMS_CONTINUE_BODY" >> "$NEXT_PROMPT_FILE"
+            if [[ -n "$WORKTREE_ROOT_SAFE" ]]; then
+                echo "" >> "$NEXT_PROMPT_FILE"
+                echo "Worktree root (state, sanitized): \`$WORKTREE_ROOT_SAFE\`" >> "$NEXT_PROMPT_FILE"
+            fi
+        fi
+    else
+        cat >> "$NEXT_PROMPT_FILE" << 'WORKTREE_TEAMS_FALLBACK_EOF'
+
+Continue using scheduler/worker/reviewer worktree orchestration.
+Each task must be explicitly marked parallelizable (`yes` or `no`) before assignment.
+WORKTREE_TEAMS_FALLBACK_EOF
+    fi
+fi
 
 append_task_tag_routing_note "$NEXT_PROMPT_FILE"
 
