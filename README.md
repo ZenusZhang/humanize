@@ -1,6 +1,6 @@
 # Humanize
 
-**Current Version: 1.10.22**
+**Current Version: 1.11.1**
 
 > Derived from the [GAAC (GitHub-as-a-Context)](https://github.com/SihaoLiu/gaac) project.
 
@@ -49,6 +49,8 @@ If you have the plugin cloned locally:
 # Start Claude Code with the plugin directory
 claude --plugin-dir /path/to/humanize
 ```
+
+For Codex skill runtime installation, see [Install Humanize Skills for Codex](docs/install-for-codex.md).
 
 ### Prerequisites
 

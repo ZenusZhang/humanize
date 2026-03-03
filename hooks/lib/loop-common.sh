@@ -43,16 +43,29 @@ readonly FIELD_WORKTREE_ROOT="worktree_root"
 readonly FIELD_DELEGATION_ENFORCEMENT="delegation_enforcement"
 
 # Default Codex configuration (single source of truth - all scripts reference this)
-# Both use :- so scripts can override before sourcing when needed.
+# Both use :- so scripts can override before sourcing (e.g. PR loop sets different model/effort).
 #
-# Role split:
-# - Analyzer/Reviewer: gpt-5.2 (non-codex)
-# - Worker (implementation): gpt-5.3-codex
+# Role split (hybrid: role-based defaults + runtime-aware worker model):
+# - Analyzer/Reviewer (DEFAULT_CODEX_MODEL): gpt-5.2 in all modes (always available)
+# - Worker/Implementer (DEFAULT_CODEX_WORKER_MODEL): runtime-aware
+#     Claude Code plugin mode -> gpt-5.3-codex (available in plugin sandbox)
+#     Skill mode (Codex/Kimi) -> gpt-5.2 (gpt-5.3-codex unavailable outside plugin)
+#
+# Detection: check BASH_SOURCE path for .claude/plugins/cache/ (CLAUDE_PLUGIN_ROOT is a
+# config-time template variable, not a runtime env var, so we cannot check it directly).
 DEFAULT_CODEX_MODEL="${DEFAULT_CODEX_MODEL:-gpt-5.2}"
 DEFAULT_CODEX_EFFORT="${DEFAULT_CODEX_EFFORT:-xhigh}"
 
 # Default worker configuration (used by /humanize:codex-worker).
-DEFAULT_CODEX_WORKER_MODEL="${DEFAULT_CODEX_WORKER_MODEL:-gpt-5.3-codex}"
+if [[ -z "${DEFAULT_CODEX_WORKER_MODEL:-}" ]]; then
+    _LOOP_COMMON_SELF="${BASH_SOURCE[0]:-$0}"
+    if [[ "$_LOOP_COMMON_SELF" == */.claude/plugins/cache/* ]]; then
+        DEFAULT_CODEX_WORKER_MODEL="gpt-5.3-codex"
+    else
+        DEFAULT_CODEX_WORKER_MODEL="gpt-5.2"
+    fi
+    unset _LOOP_COMMON_SELF
+fi
 DEFAULT_CODEX_WORKER_EFFORT="${DEFAULT_CODEX_WORKER_EFFORT:-xhigh}"
 
 # Codex review markers

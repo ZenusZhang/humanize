@@ -26,7 +26,9 @@ GIT_TIMEOUT=30
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/portable-timeout.sh"
 
-# Source shared loop library (provides DEFAULT_CODEX_MODEL and other constants)
+# Source shared loop library (provides runtime-aware DEFAULT_CODEX_MODEL and other constants)
+# Callers can override by exporting DEFAULT_CODEX_MODEL/DEFAULT_CODEX_EFFORT
+# before invoking this script.
 HOOKS_LIB_DIR="$(cd "$SCRIPT_DIR/../hooks/lib" && pwd)"
 source "$HOOKS_LIB_DIR/loop-common.sh"
 
@@ -57,7 +59,7 @@ BITLESSON_ALLOW_EMPTY_NONE="true"
 DELEGATION_ENFORCEMENT="${HUMANIZE_CODEX_DELEGATION_ENFORCEMENT:-warn}"
 
 show_help() {
-    cat << 'HELP_EOF'
+    cat <<HELP_EOF
 start-rlcr-loop - Iterative development with Codex review
 
 USAGE:
@@ -72,7 +74,7 @@ OPTIONS:
   --track-plan-file    Indicate plan file should be tracked in git (must be clean)
   --max <N>            Maximum iterations before auto-stop (default: 42)
   --codex-model <MODEL:EFFORT>
-                       Codex model and reasoning effort (default: gpt-5.2:xhigh)
+                       Codex model and reasoning effort for codex exec (default: ${DEFAULT_CODEX_MODEL}:${DEFAULT_CODEX_EFFORT})
   --codex-timeout <SECONDS>
                        Timeout for each Codex review in seconds (default: 5400)
   --push-every-round   Require git push after each round (default: commits stay local)
@@ -135,7 +137,7 @@ DESCRIPTION:
 EXAMPLES:
   /humanize:start-rlcr-loop docs/feature-plan.md
   /humanize:start-rlcr-loop docs/impl.md --max 20
-  /humanize:start-rlcr-loop plan.md --codex-model gpt-5.2:xhigh
+  /humanize:start-rlcr-loop plan.md --codex-model ${DEFAULT_CODEX_MODEL}:${DEFAULT_CODEX_EFFORT}
   /humanize:start-rlcr-loop plan.md --codex-timeout 7200  # 2 hour timeout
   /humanize:start-rlcr-loop plan.md --agent-teams --worktree-teams
   /humanize:start-rlcr-loop plan.md
@@ -1439,6 +1441,7 @@ Start Branch: $START_BRANCH
 Base Branch: $BASE_BRANCH
 Codex Model: $CODEX_MODEL
 Codex Effort: $CODEX_EFFORT
+Codex Review Effort: high
 Codex Timeout: ${CODEX_TIMEOUT}s
 Delegation Enforcement: $DELEGATION_ENFORCEMENT
 Loop Directory: $LOOP_DIR
@@ -1467,6 +1470,7 @@ Base Branch: $BASE_BRANCH
 Max Iterations: $MAX_ITERATIONS
 Codex Model: $CODEX_MODEL
 Codex Effort: $CODEX_EFFORT
+Codex Review Effort: high
 Codex Timeout: ${CODEX_TIMEOUT}s
 Full Review Round: $FULL_REVIEW_ROUND (Full Alignment Checks at rounds $((FULL_REVIEW_ROUND - 1)), $((2 * FULL_REVIEW_ROUND - 1)), $((3 * FULL_REVIEW_ROUND - 1)), ...)
 Ask User for Codex Questions: $ASK_CODEX_QUESTION
