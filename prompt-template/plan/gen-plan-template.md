@@ -1,9 +1,9 @@
-# <Chinese Plan Title> / <English Plan Title>
+# <English Plan Title>
 
 ## Language Format
-Default: bilingual Simplified Chinese + English.
-Rendering pattern for headings and key statements: <Chinese text> / <English text>
-Keep identifiers (`AC-1`, task IDs, file paths, API names, command flags) unchanged.
+Default: English only.
+A separate `_zh` Chinese-only variant is generated when `chinese_plan=true` in `.humanize/config.json`.
+Keep identifiers (`AC-1`, task IDs, file paths, API names, command flags) unchanged in both files.
 
 ## Goal Description
 <Clear, direct description of what needs to be accomplished>
@@ -142,6 +142,6 @@ When `chinese_plan=true` is set in `.humanize/config.json`, a `_zh` variant of t
 - `docs/my-plan.md` becomes `docs/my-plan_zh.md`
 - `output` (no extension) becomes `output_zh`
 
-The `_zh` file contains only the Chinese portions of the bilingual plan. All identifiers (`AC-*`, task IDs, file paths, API names, command flags) remain unchanged, as they are language-neutral.
+The `_zh` file contains a full Chinese translation of the English plan. All identifiers (`AC-*`, task IDs, file paths, API names, command flags) remain unchanged, as they are language-neutral.
 
 When `chinese_plan=false` (the default), or when `.humanize/config.json` does not exist, or when the `chinese_plan` field is absent, the `_zh` file is NOT written. A missing config file is not an error.

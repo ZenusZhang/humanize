@@ -198,16 +198,16 @@ else
     fail "plan template includes three-batch codex workflow section" "Codex Team Workflow section" "missing"
 fi
 
-if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "bilingual Simplified Chinese + English" "$GEN_PLAN_CMD"; then
-    pass "gen-plan command defaults structured output to bilingual Chinese/English"
+if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "English only" "$GEN_PLAN_CMD" && grep -q "chinese_plan" "$GEN_PLAN_CMD"; then
+    pass "gen-plan command defaults to English-only with optional _zh via config"
 else
-    fail "gen-plan command defaults structured output to bilingual Chinese/English" "bilingual language requirement" "missing"
+    fail "gen-plan command defaults to English-only with optional _zh via config" "English-only default with chinese_plan config" "missing"
 fi
 
-if [[ -f "$PLAN_TEMPLATE" ]] && grep -q "## Language Format" "$PLAN_TEMPLATE" && grep -q "bilingual Simplified Chinese + English" "$PLAN_TEMPLATE"; then
-    pass "plan template includes bilingual language format guidance"
+if [[ -f "$PLAN_TEMPLATE" ]] && grep -q "## Language Format" "$PLAN_TEMPLATE" && grep -q "English only" "$PLAN_TEMPLATE"; then
+    pass "plan template includes English-only language format guidance"
 else
-    fail "plan template includes bilingual language format guidance" "Language Format section with bilingual default" "missing"
+    fail "plan template includes English-only language format guidance" "Language Format section with English-only default" "missing"
 fi
 
 if [[ -f "$GEN_PLAN_CMD" ]] && grep -q "## Task Breakdown" "$GEN_PLAN_CMD"; then
