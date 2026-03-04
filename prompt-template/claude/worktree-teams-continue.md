@@ -12,7 +12,7 @@ Keep using document-centered worktree orchestration in this round.
    - assigned worktree path
    - assigned branch
    - file ownership boundary
-5. Ensure each worker runs `bitlesson-selector` for each sub-task (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec` with `gpt-5.2:high`) or the `bitlesson-selector` agent) and records selected lesson IDs (or `NONE`) in the lane report.
+5. Ensure each worker runs `bitlesson-selector` for each sub-task (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec` with `gpt-5.2`, reasoning effort `high`) or the `bitlesson-selector` agent) and records selected lesson IDs (or `NONE`) in the lane report.
 6. Ensure each worker run uses `/humanize:codex-worker --workdir <worktree path>` (default: `gpt-5.3-codex:xhigh`).
 7. Require reviewer-agent signoff per lane before integrating changes.
 8. Ensure every worker/reviewer prompt includes explicit cross-vendor review context:
