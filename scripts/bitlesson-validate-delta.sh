@@ -89,12 +89,7 @@ block_exit() {
     exit 0
 }
 
-HAS_BITLESSON_DELTA_HEADER=false
-if grep -qi '^##[[:space:]]*BitLesson Delta[[:space:]]*$' "$SUMMARY_FILE"; then
-    HAS_BITLESSON_DELTA_HEADER=true
-fi
-
-if [[ "$HAS_BITLESSON_DELTA_HEADER" != "true" ]]; then
+if ! grep -qi '^##[[:space:]]*BitLesson Delta[[:space:]]*$' "$SUMMARY_FILE"; then
     FALLBACK=$(cat <<'EOF'
 # BitLesson Delta Missing
 
@@ -215,10 +210,7 @@ EOF
     INVALID_IDS=""
     MISSING_IDS=""
     HAS_ANY_ID=false
-    OLD_IFS="$IFS"
-    IFS=','
-    read -r -a LESSON_ID_ARRAY <<< "$BITLESSON_IDS_RAW"
-    IFS="$OLD_IFS"
+    IFS=',' read -r -a LESSON_ID_ARRAY <<< "$BITLESSON_IDS_RAW"
 
     for RAW_ID in "${LESSON_ID_ARRAY[@]}"; do
         LESSON_ID=$(echo "$RAW_ID" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')

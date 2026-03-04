@@ -86,11 +86,6 @@ if [[ ! -f "$BITLESSON_FILE" ]]; then
     exit 1
 fi
 
-if [[ ! -s "$BITLESSON_FILE" ]]; then
-    echo "Error: BitLesson file is empty: $BITLESSON_FILE" >&2
-    exit 1
-fi
-
 BITLESSON_CONTENT="$(cat "$BITLESSON_FILE")"
 if [[ -z "$(printf '%s' "$BITLESSON_CONTENT" | tr -d ' \t\n\r')" ]]; then
     echo "Error: BitLesson file is empty (whitespace only): $BITLESSON_FILE" >&2
