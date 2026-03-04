@@ -19,6 +19,9 @@ source "$SCRIPT_DIR/test-helpers.sh"
 SETUP_SCRIPT="$PROJECT_ROOT/scripts/setup-rlcr-loop.sh"
 STOP_HOOK="$PROJECT_ROOT/hooks/loop-codex-stop-hook.sh"
 BITLESSON_TEMPLATE_FILE="$PROJECT_ROOT/templates/bitlesson.md"
+BITLESSON_INIT_SCRIPT="$PROJECT_ROOT/scripts/bitlesson-init.sh"
+BITLESSON_VALIDATE_DELTA_SCRIPT="$PROJECT_ROOT/scripts/bitlesson-validate-delta.sh"
+BITLESSON_SELECT_SCRIPT="$PROJECT_ROOT/scripts/bitlesson-select.sh"
 
 echo "=========================================="
 echo "BitLesson Workflow Tests"
@@ -96,10 +99,62 @@ else
 fi
 
 # ========================================
-# Test 2: Setup initializes project-level bitlesson and round-0 requirements
+# Test 2: Extracted BitLesson scripts exist and validate inputs
 # ========================================
 
+if [[ -f "$BITLESSON_INIT_SCRIPT" && -x "$BITLESSON_INIT_SCRIPT" ]]; then
+    pass "bitlesson-init.sh exists and is executable"
+else
+    fail "bitlesson-init.sh exists and is executable" "executable script" "missing or not executable"
+fi
+
+if [[ -f "$BITLESSON_VALIDATE_DELTA_SCRIPT" && -x "$BITLESSON_VALIDATE_DELTA_SCRIPT" ]]; then
+    pass "bitlesson-validate-delta.sh exists and is executable"
+else
+    fail "bitlesson-validate-delta.sh exists and is executable" "executable script" "missing or not executable"
+fi
+
+if [[ -f "$BITLESSON_SELECT_SCRIPT" && -x "$BITLESSON_SELECT_SCRIPT" ]]; then
+    pass "bitlesson-select.sh exists and is executable"
+else
+    fail "bitlesson-select.sh exists and is executable" "executable script" "missing or not executable"
+fi
+
 setup_test_dir
+mkdir -p "$TEST_DIR/init-project"
+
+set +e
+bash "$BITLESSON_INIT_SCRIPT" --project-root "$TEST_DIR/init-project" --template "$TEST_DIR/does-not-exist.md" > /dev/null 2>&1
+INIT_BAD_TEMPLATE_EXIT=$?
+set -e
+
+if [[ "$INIT_BAD_TEMPLATE_EXIT" -ne 0 ]] && [[ ! -f "$TEST_DIR/init-project/bitlesson.md" ]]; then
+    pass "bitlesson-init.sh errors when template file is missing"
+else
+    fail "bitlesson-init.sh errors when template file is missing" "non-zero exit and no file created" "exit=$INIT_BAD_TEMPLATE_EXIT"
+fi
+
+bash "$BITLESSON_INIT_SCRIPT" --project-root "$TEST_DIR/init-project" --template "$BITLESSON_TEMPLATE_FILE" > /dev/null 2>&1
+
+if [[ -f "$TEST_DIR/init-project/bitlesson.md" ]]; then
+    pass "bitlesson-init.sh creates bitlesson.md from template when missing"
+else
+    fail "bitlesson-init.sh creates bitlesson.md from template when missing" "bitlesson.md created" "not found"
+fi
+
+echo "SENTINEL" > "$TEST_DIR/init-project/bitlesson.md"
+bash "$BITLESSON_INIT_SCRIPT" --project-root "$TEST_DIR/init-project" --template "$BITLESSON_TEMPLATE_FILE" > /dev/null 2>&1
+
+if grep -q "SENTINEL" "$TEST_DIR/init-project/bitlesson.md"; then
+    pass "bitlesson-init.sh does not overwrite an existing bitlesson.md"
+else
+    fail "bitlesson-init.sh does not overwrite an existing bitlesson.md" "SENTINEL preserved" "template content overwritten"
+fi
+
+# ========================================
+# Test 3: Setup initializes project-level bitlesson and round-0 requirements
+# ========================================
+
 init_test_git_repo "$TEST_DIR/project"
 mkdir -p "$TEST_DIR/project/plans" "$TEST_DIR/project/bin"
 cat > "$TEST_DIR/project/plans/plan.md" << 'EOF'
@@ -167,7 +222,7 @@ else
 fi
 
 # ========================================
-# Test 3: Team/worktree templates enforce selector constraints
+# Test 4: Team/worktree templates enforce selector constraints
 # ========================================
 
 for template in \
@@ -185,7 +240,7 @@ do
 done
 
 # ========================================
-# Test 4: Next-round prompt keeps BitLesson requirements
+# Test 5: Next-round prompt keeps BitLesson requirements
 # ========================================
 
 # Add one concrete lesson entry so Action:none in later round remains valid.
@@ -236,7 +291,7 @@ else
 fi
 
 # ========================================
-# Test 5: Stop hook blocks Action:add when lesson IDs are not in bitlesson.md
+# Test 6: Stop hook blocks Action:add when lesson IDs are not in bitlesson.md
 # ========================================
 
 cat > "$LOOP_DIR/round-2-summary.md" << 'EOF'
@@ -258,7 +313,7 @@ else
 fi
 
 # ========================================
-# Test 6: Stop hook blocks when BitLesson Delta is missing
+# Test 7: Stop hook blocks when BitLesson Delta is missing
 # ========================================
 
 cat > "$LOOP_DIR/round-2-summary.md" << 'EOF'
@@ -275,7 +330,7 @@ else
 fi
 
 # ========================================
-# Test 7: Stop hook allows round>0 Action:none by default when bitlesson has no concrete entries
+# Test 8: Stop hook allows round>0 Action:none by default when bitlesson has no concrete entries
 # ========================================
 
 cp "$BITLESSON_TEMPLATE_FILE" "$TEST_DIR/project/bitlesson.md"
@@ -301,7 +356,7 @@ else
 fi
 
 # ========================================
-# Test 8: Strict mode blocks round>0 Action:none when bitlesson has no concrete entries
+# Test 9: Strict mode blocks round>0 Action:none when bitlesson has no concrete entries
 # ========================================
 
 sed -i 's/^bitlesson_allow_empty_none: true$/bitlesson_allow_empty_none: false/' "$STATE_FILE"

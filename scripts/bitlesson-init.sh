@@ -11,7 +11,6 @@ Behavior:
   - Default bitlesson-relpath: bitlesson.md
   - Creates <project-root>/<bitlesson-relpath> from template if missing
   - Does not overwrite existing file
-  - Falls back to inline template if --template does not exist
   - Prints the resolved bitlesson file path to stdout on success
 USAGE_EOF
 }
@@ -63,6 +62,11 @@ if [[ ! -d "$PROJECT_ROOT" ]]; then
     exit 1
 fi
 
+if [[ ! -f "$TEMPLATE_PATH" ]]; then
+    echo "Error: --template must be an existing file: $TEMPLATE_PATH" >&2
+    exit 1
+fi
+
 PROJECT_ROOT_ABS="$(cd "$PROJECT_ROOT" && pwd -P)"
 BITLESSON_FILE="$PROJECT_ROOT_ABS/$BITLESSON_RELPATH"
 
@@ -73,35 +77,7 @@ fi
 
 if [[ ! -f "$BITLESSON_FILE" ]]; then
     mkdir -p "$(dirname "$BITLESSON_FILE")"
-    if [[ -f "$TEMPLATE_PATH" ]]; then
-        cp "$TEMPLATE_PATH" "$BITLESSON_FILE"
-    else
-        cat > "$BITLESSON_FILE" << 'BITLESSON_EOF'
-# BitLesson Knowledge Base
-
-This file is project-specific. Keep entries precise and reusable for future rounds.
-
-## Entry Template (Strict)
-
-Use this exact field order for every entry:
-
-```markdown
-## Lesson: <unique-id>
-Lesson ID: <BL-YYYYMMDD-short-name>
-Scope: <component/subsystem/files>
-Problem Description: <specific failure mode with trigger conditions>
-Root Cause: <direct technical cause>
-Solution: <exact fix that resolved the problem>
-Constraints: <limits, assumptions, non-goals>
-Validation Evidence: <tests/commands/logs/PR evidence>
-Source Rounds: <round numbers where problem appeared and was solved>
-```
-
-## Entries
-
-<!-- Add lessons below using the strict template. -->
-BITLESSON_EOF
-    fi
+    cp "$TEMPLATE_PATH" "$BITLESSON_FILE"
 fi
 
 printf '%s\n' "$BITLESSON_FILE"
