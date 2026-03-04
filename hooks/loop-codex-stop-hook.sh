@@ -820,7 +820,7 @@ fi
 # ========================================
 
 if [[ "$IS_FINALIZE_PHASE" != "true" ]] && [[ "$BITLESSON_REQUIRED" == "true" ]]; then
-    BITLESSON_DELTA_RESULT=$(bash "$PROJECT_ROOT/scripts/bitlesson-validate-delta.sh" \
+    BITLESSON_DELTA_RESULT=$(bash "$PLUGIN_ROOT/scripts/bitlesson-validate-delta.sh" \
         --summary-file "$SUMMARY_FILE" \
         --bitlesson-file "$BITLESSON_FILE" \
         --bitlesson-relpath "$BITLESSON_FILE_REL" \
