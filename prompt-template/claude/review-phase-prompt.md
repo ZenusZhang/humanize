@@ -8,7 +8,7 @@ You are in the **Review Phase**. Codex has performed a code review and found iss
 
 ## Instructions
 
-1. **Read `bitlesson.md` and run `bitlesson-selector`** for each fix task/sub-task before coding
+1. **Read `bitlesson.md` and run `bitlesson-selector`** for each fix task/sub-task before coding (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec` with `gpt-5.2:high`) or the `bitlesson-selector` agent)
 2. **Sub-agent calls must include cross-agent context**:
    - worker/implementation: "your output will be reviewed independently (cross-vendor style)"
    - reviewer over worker artifacts: "you are reviewing findings/results produced by an independent worker (cross-vendor style)"

@@ -950,37 +950,11 @@ BITLESSON_FILE_REL="bitlesson.md"
 BITLESSON_FILE="$PROJECT_ROOT/$BITLESSON_FILE_REL"
 PLUGIN_BITLESSON_TEMPLATE="$SCRIPT_DIR/../templates/bitlesson.md"
 
-if [[ ! -f "$BITLESSON_FILE" ]]; then
-    if [[ -f "$PLUGIN_BITLESSON_TEMPLATE" ]]; then
-        cp "$PLUGIN_BITLESSON_TEMPLATE" "$BITLESSON_FILE"
-    else
-        cat > "$BITLESSON_FILE" << 'BITLESSON_EOF'
-# BitLesson Knowledge Base
-
-This file is project-specific. Keep entries precise and reusable for future rounds.
-
-## Entry Template (Strict)
-
-Use this exact field order for every entry:
-
-```markdown
-## Lesson: <unique-id>
-Lesson ID: <BL-YYYYMMDD-short-name>
-Scope: <component/subsystem/files>
-Problem Description: <specific failure mode with trigger conditions>
-Root Cause: <direct technical cause>
-Solution: <exact fix that resolved the problem>
-Constraints: <limits, assumptions, non-goals>
-Validation Evidence: <tests/commands/logs/PR evidence>
-Source Rounds: <round numbers where problem appeared and was solved>
-```
-
-## Entries
-
-<!-- Add lessons below using the strict template. -->
-BITLESSON_EOF
-    fi
-fi
+# Use extracted init script
+bash "$SCRIPT_DIR/bitlesson-init.sh" \
+    --project-root "$PROJECT_ROOT" \
+    --template "$PLUGIN_BITLESSON_TEMPLATE" \
+    --bitlesson-relpath "$BITLESSON_FILE_REL" > /dev/null
 
 # ========================================
 # Create State File

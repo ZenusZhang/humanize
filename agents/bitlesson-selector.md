@@ -1,7 +1,7 @@
 ---
 name: bitlesson-selector
 description: Selects required BitLesson entries for a specific sub-task. Use before execution for every task or sub-task.
-model: haiku
+model: gpt-5.2
 tools: Read, Grep
 ---
 
@@ -18,7 +18,8 @@ You will receive:
 
 ## Cross-Agent Review Context
 
-- You are a Claude-side sub-agent in a Claude/Codex loop.
+- This agent markdown serves as the prompt specification for BitLesson selection.
+- Runtime execution happens via `scripts/bitlesson-select.sh`, which calls Codex CLI (`codex exec`) with `gpt-5.2:high`.
 - Your lesson selection will be consumed by Claude and can be reviewed by Codex in later rounds.
 - Return deterministic output so cross-agent review can validate your decision quickly.
 
