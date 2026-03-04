@@ -29,7 +29,7 @@ Below is Codex's review result:
 
 Before executing any task or sub-task in this round:
 - Read @{{BITLESSON_FILE}}
-- Run `bitlesson-selector` with sub-task + related paths + `bitlesson.md` (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec` with `gpt-5.2`, reasoning effort `high`) or the `bitlesson-selector` agent)
+- Run `bitlesson-selector` with sub-task + related paths + `bitlesson.md` (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec -m gpt-5.2 -c model_reasoning_effort=high`) or the `bitlesson-selector` agent)
 - Apply selected lesson IDs (or `NONE`) during implementation
 - If a problem is solved only after multiple rounds, add/update the lesson entry in `bitlesson.md`
 

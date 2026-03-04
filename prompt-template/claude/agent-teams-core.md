@@ -27,7 +27,7 @@ If you feel the urge to implement something directly, STOP and delegate it to a 
 5. **Quality**: Verify worker output before considering tasks complete. Confirm changes match requirements, do not conflict, and have validation evidence.
 6. **Commits**: Prefer one focused commit per work package (per worktree lane when using worktrees). Keep commit messages specific to the change set.
 7. **Plan Approval**: For high-risk tasks, require a short plan before running the worker.
-8. **BitLesson Discipline**: Require running `bitlesson-selector` before each sub-task (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec` with `gpt-5.2`, reasoning effort `high`) or the `bitlesson-selector` agent) and record selected lesson IDs (or `NONE`) in the work notes.
+8. **BitLesson Discipline**: Require running `bitlesson-selector` before each sub-task (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec -m gpt-5.2 -c model_reasoning_effort=high`) or the `bitlesson-selector` agent) and record selected lesson IDs (or `NONE`) in the work notes.
 9. **Worker Model Default**: When invoking `/humanize:codex-worker`, keep the default `gpt-5.3-codex:xhigh` unless there's a concrete reason to override.
 10. **Cross-Vendor Review Context (MANDATORY)**: In every worker/analyzer/reviewer prompt, include one explicit sentence stating the cross-vendor-style relationship:
     - worker task: "Your output will be reviewed independently (cross-vendor style) by a separate analyzer/reviewer."
