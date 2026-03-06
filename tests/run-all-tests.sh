@@ -32,6 +32,7 @@ echo ""
 TEST_SUITES=(
     "test-template-loader.sh"
     "test-bash-validator-patterns.sh"
+    "test-continue-rlcr-loop.sh"
     "test-todo-checker.sh"
     "test-plan-file-validation.sh"
     "test-template-references.sh"
