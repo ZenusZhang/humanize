@@ -20,6 +20,8 @@ A Claude Code plugin that provides iterative development with independent AI rev
 
 The loop has two phases: **Implementation** (Claude works, Codex reviews summaries) and **Code Review** (Codex checks code quality with severity markers). Issues feed back into implementation until resolved.
 
+**Model Policy**: Codex worker executes `coding` tasks (default: `gpt-5.3-codex:xhigh`); Codex analyzer executes `analyze` tasks (default: `gpt-5.2:xhigh`, non-codex); Codex reviewer independently reviews progress (default: `gpt-5.2:xhigh`, non-codex).
+
 ## Install
 
 ```bash
@@ -32,6 +34,9 @@ Requires [codex CLI](https://github.com/openai/codex) for review. See the full [
 ## Quick Start
 
 1. **Generate a plan** from your draft:
+   ```bash
+   /humanize:gen-plan --input draft.md --output docs/plan.md
+   ```
    ```bash
    /humanize:gen-plan --input draft.md --output docs/plan.md
    ```
