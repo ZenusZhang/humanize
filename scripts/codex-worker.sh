@@ -1,15 +1,14 @@
 #!/bin/bash
 #
-# Ask Codex - One-shot consultation with Codex
+# Codex Worker - Implementation worker via Codex CLI
 #
-# Sends a question or task to codex exec and returns the response.
-# This is an active, one-shot skill (unlike the passive RLCR loop).
+# Runs `codex exec` to implement a concrete coding task.
 #
 # Usage:
-#   ask-codex.sh [--codex-model MODEL:EFFORT] [--codex-timeout SECONDS] [question...]
+#   codex-worker.sh [--worker-model MODEL:EFFORT] [--worker-timeout SECONDS] [--workdir PATH] [task...]
 #
 # Output:
-#   stdout: Codex's response (for Claude to read)
+#   stdout: Codex worker response (for the coordinator to read)
 #   stderr: Status/debug info (model, effort, log paths)
 #
 # Storage:
@@ -28,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # Source portable timeout wrapper
 source "$SCRIPT_DIR/portable-timeout.sh"
 
-# Source shared loop library for DEFAULT_CODEX_MODEL and DEFAULT_CODEX_EFFORT
+# Source shared loop library for DEFAULT_CODEX_WORKER_MODEL and DEFAULT_CODEX_WORKER_EFFORT
 HOOKS_LIB_DIR="$(cd "$SCRIPT_DIR/../hooks/lib" && pwd)"
 source "$HOOKS_LIB_DIR/loop-common.sh"
 
@@ -36,11 +35,12 @@ source "$HOOKS_LIB_DIR/loop-common.sh"
 # Default Configuration
 # ========================================
 
-DEFAULT_ASK_CODEX_TIMEOUT=3600
+DEFAULT_CODEX_WORKER_TIMEOUT=5400
 
-CODEX_MODEL="$DEFAULT_CODEX_MODEL"
-CODEX_EFFORT="$DEFAULT_CODEX_EFFORT"
-CODEX_TIMEOUT="$DEFAULT_ASK_CODEX_TIMEOUT"
+WORKER_MODEL="$DEFAULT_CODEX_WORKER_MODEL"
+WORKER_EFFORT="$DEFAULT_CODEX_WORKER_EFFORT"
+WORKER_TIMEOUT="$DEFAULT_CODEX_WORKER_TIMEOUT"
+WORKDIR=""
 
 # ========================================
 # Help
@@ -48,28 +48,21 @@ CODEX_TIMEOUT="$DEFAULT_ASK_CODEX_TIMEOUT"
 
 show_help() {
     cat << 'HELP_EOF'
-ask-codex - One-shot consultation with Codex
+codex-worker - Implementation worker via Codex CLI
 
 USAGE:
-  /humanize:ask-codex [OPTIONS] <question or task>
+  /humanize:codex-worker [OPTIONS] <task or instructions>
 
 OPTIONS:
-  --codex-model <MODEL:EFFORT>
-                       Codex model and reasoning effort (default: gpt-5.4:xhigh)
-  --codex-timeout <SECONDS>
-                       Timeout for the Codex query in seconds (default: 3600)
+  --worker-model <MODEL:EFFORT>
+                       Worker model and reasoning effort (default: gpt-5.3-codex:xhigh)
+  --worker-timeout <SECONDS>
+                       Timeout for the worker run in seconds (default: 5400)
+  --workdir <PATH>     Directory to run in (defaults to git root of CWD)
   -h, --help           Show this help message
 
 DESCRIPTION:
-  Sends a one-shot question or task to Codex and returns the response.
-  Unlike the RLCR loop, this is a single consultation without iteration.
-
-  The response is saved to .humanize/skill/<unique-id>/output.md for reference.
-
-EXAMPLES:
-  /humanize:ask-codex How should I structure the authentication module?
-  /humanize:ask-codex --codex-model gpt-5.4:high What are the performance bottlenecks?
-  /humanize:ask-codex --codex-timeout 300 Review the error handling in src/api/
+  Runs Codex CLI as an implementation worker. Use this for `coding` tasks.
 
 ENVIRONMENT:
   HUMANIZE_CODEX_BYPASS_SANDBOX
@@ -83,13 +76,12 @@ HELP_EOF
 # Parse Arguments
 # ========================================
 
-QUESTION_PARTS=()
+TASK_PARTS=()
 OPTIONS_DONE=false
 
 while [[ $# -gt 0 ]]; do
     if [[ "$OPTIONS_DONE" == "true" ]]; then
-        # After first positional token or --, all remaining args are question text
-        QUESTION_PARTS+=("$1")
+        TASK_PARTS+=("$1")
         shift
         continue
     fi
@@ -98,35 +90,41 @@ while [[ $# -gt 0 ]]; do
             show_help
             ;;
         --)
-            # Explicit end-of-options marker
             OPTIONS_DONE=true
             shift
             ;;
-        --codex-model)
+        --worker-model)
             if [[ -z "${2:-}" ]]; then
-                echo "Error: --codex-model requires a MODEL:EFFORT argument" >&2
+                echo "Error: --worker-model requires a MODEL:EFFORT argument" >&2
                 exit 1
             fi
-            # Parse MODEL:EFFORT format (same pattern as setup-rlcr-loop.sh)
             if [[ "$2" == *:* ]]; then
-                CODEX_MODEL="${2%%:*}"
-                CODEX_EFFORT="${2#*:}"
+                WORKER_MODEL="${2%%:*}"
+                WORKER_EFFORT="${2#*:}"
             else
-                CODEX_MODEL="$2"
-                CODEX_EFFORT="$DEFAULT_CODEX_EFFORT"
+                WORKER_MODEL="$2"
+                WORKER_EFFORT="$DEFAULT_CODEX_WORKER_EFFORT"
             fi
             shift 2
             ;;
-        --codex-timeout)
+        --worker-timeout)
             if [[ -z "${2:-}" ]]; then
-                echo "Error: --codex-timeout requires a number argument (seconds)" >&2
+                echo "Error: --worker-timeout requires a number argument (seconds)" >&2
                 exit 1
             fi
             if ! [[ "$2" =~ ^[0-9]+$ ]]; then
-                echo "Error: --codex-timeout must be a positive integer (seconds), got: $2" >&2
+                echo "Error: --worker-timeout must be a positive integer (seconds), got: $2" >&2
                 exit 1
             fi
-            CODEX_TIMEOUT="$2"
+            WORKER_TIMEOUT="$2"
+            shift 2
+            ;;
+        --workdir)
+            if [[ -z "${2:-}" ]] || [[ "${2:-}" == -* ]]; then
+                echo "Error: --workdir requires a path argument" >&2
+                exit 1
+            fi
+            WORKDIR="$2"
             shift 2
             ;;
         -*)
@@ -135,64 +133,62 @@ while [[ $# -gt 0 ]]; do
             exit 1
             ;;
         *)
-            # First positional token: stop parsing options, rest is question
-            QUESTION_PARTS+=("$1")
+            TASK_PARTS+=("$1")
             OPTIONS_DONE=true
             shift
             ;;
     esac
 done
 
-# Join question parts into a single string
-QUESTION="${QUESTION_PARTS[*]}"
+TASK="${TASK_PARTS[*]}"
 
 # ========================================
 # Validate Prerequisites
 # ========================================
 
-# Check codex is available
 if ! command -v codex &>/dev/null; then
     echo "Error: 'codex' command is not installed or not in PATH" >&2
     echo "" >&2
     echo "Please install Codex CLI: https://github.com/openai/codex" >&2
-    echo "Then retry: /humanize:ask-codex <your question>" >&2
+    echo "Then retry: /humanize:codex-worker <your task>" >&2
     exit 1
 fi
 
-# Check question is not empty
-if [[ -z "$QUESTION" ]]; then
-    echo "Error: No question or task provided" >&2
+if [[ -z "$TASK" ]]; then
+    echo "Error: No task/instructions provided" >&2
     echo "" >&2
-    echo "Usage: /humanize:ask-codex [OPTIONS] <question or task>" >&2
+    echo "Usage: /humanize:codex-worker [OPTIONS] <task or instructions>" >&2
     echo "" >&2
-    echo "For help: /humanize:ask-codex --help" >&2
+    echo "For help: /humanize:codex-worker --help" >&2
     exit 1
 fi
 
-# Validate codex model for safety (alphanumeric, hyphen, underscore, dot)
-if [[ ! "$CODEX_MODEL" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-    echo "Error: Codex model contains invalid characters" >&2
-    echo "  Model: $CODEX_MODEL" >&2
+if [[ ! "$WORKER_MODEL" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    echo "Error: Worker model contains invalid characters" >&2
+    echo "  Model: $WORKER_MODEL" >&2
     echo "  Only alphanumeric, hyphen, underscore, dot allowed" >&2
     exit 1
 fi
 
-# Validate codex effort for safety (alphanumeric, hyphen, underscore)
-if [[ ! "$CODEX_EFFORT" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-    echo "Error: Codex effort contains invalid characters" >&2
-    echo "  Effort: $CODEX_EFFORT" >&2
+if [[ ! "$WORKER_EFFORT" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "Error: Worker effort contains invalid characters" >&2
+    echo "  Effort: $WORKER_EFFORT" >&2
     echo "  Only alphanumeric, hyphen, underscore allowed" >&2
     exit 1
+fi
+
+if [[ -z "$WORKDIR" ]]; then
+    WORKDIR="$(pwd)"
 fi
 
 # ========================================
 # Detect Project Root
 # ========================================
 
-if git rev-parse --show-toplevel &>/dev/null; then
-    PROJECT_ROOT=$(git rev-parse --show-toplevel)
+if git -C "$WORKDIR" rev-parse --show-toplevel &>/dev/null; then
+    PROJECT_ROOT=$(git -C "$WORKDIR" rev-parse --show-toplevel)
 else
-    PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+    PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$WORKDIR}"
 fi
 
 # ========================================
@@ -202,69 +198,62 @@ fi
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 UNIQUE_ID="${TIMESTAMP}-$$-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 
-# Project-local storage: .humanize/skill/<unique-id>/
 SKILL_DIR="$PROJECT_ROOT/.humanize/skill/$UNIQUE_ID"
 mkdir -p "$SKILL_DIR"
 
-# Cache storage: ~/.cache/humanize/<sanitized-path>/skill-<unique-id>/
-# Falls back to project-local .humanize/cache/ if home cache is not writable
 SANITIZED_PROJECT_PATH=$(echo "$PROJECT_ROOT" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/--*/-/g')
 CACHE_BASE="${XDG_CACHE_HOME:-$HOME/.cache}"
 CACHE_DIR="$CACHE_BASE/humanize/$SANITIZED_PROJECT_PATH/skill-$UNIQUE_ID"
 if ! mkdir -p "$CACHE_DIR" 2>/dev/null; then
     CACHE_DIR="$SKILL_DIR/cache"
     mkdir -p "$CACHE_DIR"
-    echo "ask-codex: warning: home cache not writable, using $CACHE_DIR" >&2
+    echo "codex-worker: warning: home cache not writable, using $CACHE_DIR" >&2
 fi
 
 # ========================================
 # Save Input
 # ========================================
 
-# Every ask-codex invocation carries explicit cross-vendor-style context so the
-# analyzer is strict and treats implementation as independently produced.
-CROSS_AGENT_CONTEXT=$(cat << 'CONTEXT_EOF'
-## Cross-Agent Review Context
+CROSS_VENDOR_CONTEXT=$(cat << 'CONTEXT_EOF'
+## Cross-Vendor Review Context (Simulated)
 
-- You are the **analyzer** running via **Codex CLI** (default: `gpt-5.2`, non-codex).
-- The implementation worker is typically **Codex CLI** (default: `gpt-5.3-codex`) unless the prompt says otherwise.
-- Treat this as **independent (cross-vendor style) review** even if both models are OpenAI today.
-- Your output will be consumed by the coordinator/worker in the next step.
+- You are the **implementation worker** running via **Codex CLI**.
+- Your work will be reviewed by an **independent analyzer/reviewer** (cross-vendor style), even if both use OpenAI models today.
+- Produce concrete, verifiable changes: edit code, run relevant checks, and report what you changed + how to validate.
 CONTEXT_EOF
 )
 
-FINAL_PROMPT="$CROSS_AGENT_CONTEXT
+FINAL_PROMPT="$CROSS_VENDOR_CONTEXT
 
 ---
 
-$QUESTION"
+$TASK"
 
 cat > "$SKILL_DIR/input.md" << EOF
-# Ask Codex Input
+# Codex Worker Input
 
 ## Question
 
-$QUESTION
+$TASK
 
 ## Configuration
 
-- Model: $CODEX_MODEL
-- Effort: $CODEX_EFFORT
-- Timeout: ${CODEX_TIMEOUT}s
+- Model: $WORKER_MODEL
+- Effort: $WORKER_EFFORT
+- Timeout: ${WORKER_TIMEOUT}s
 - Timestamp: $TIMESTAMP
+- Workdir: $WORKDIR
 EOF
 
 # ========================================
 # Build Codex Command
 # ========================================
 
-# Build codex exec arguments (same pattern as loop-codex-stop-hook.sh)
-CODEX_EXEC_ARGS=("-m" "$CODEX_MODEL")
-if [[ -n "$CODEX_EFFORT" ]]; then
-    CODEX_EXEC_ARGS+=("-c" "model_reasoning_effort=${CODEX_EFFORT}")
+CODEX_EXEC_ARGS=("-m" "$WORKER_MODEL")
+if [[ -n "$WORKER_EFFORT" ]]; then
+    CODEX_EXEC_ARGS+=("-c" "model_reasoning_effort=${WORKER_EFFORT}")
 fi
 
-# Determine automation flag based on environment variable
 CODEX_AUTO_FLAG="--full-auto"
 if [[ "${HUMANIZE_CODEX_BYPASS_SANDBOX:-}" == "true" ]] || [[ "${HUMANIZE_CODEX_BYPASS_SANDBOX:-}" == "1" ]]; then
     CODEX_AUTO_FLAG="--dangerously-bypass-approvals-and-sandbox"
@@ -281,26 +270,26 @@ CODEX_STDOUT_FILE="$CACHE_DIR/codex-run.out"
 CODEX_STDERR_FILE="$CACHE_DIR/codex-run.log"
 
 {
-    echo "# Codex ask-codex invocation debug info"
+    echo "# Codex worker invocation debug info"
     echo "# Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "# Working directory: $PROJECT_ROOT"
-    echo "# Timeout: $CODEX_TIMEOUT seconds"
+    echo "# Workdir argument: $WORKDIR"
+    echo "# Timeout: $WORKER_TIMEOUT seconds"
     echo ""
     echo "codex exec ${CODEX_EXEC_ARGS[*]} \"<prompt>\""
     echo ""
     echo "# Prompt content:"
-    echo "$QUESTION"
+    echo "$FINAL_PROMPT"
 } > "$CODEX_CMD_FILE"
 
 # ========================================
 # Run Codex
 # ========================================
 
-echo "ask-codex: model=$CODEX_MODEL effort=$CODEX_EFFORT timeout=${CODEX_TIMEOUT}s" >&2
-echo "ask-codex: cache=$CACHE_DIR" >&2
-echo "ask-codex: running codex exec..." >&2
+echo "codex-worker: model=$WORKER_MODEL effort=$WORKER_EFFORT timeout=${WORKER_TIMEOUT}s" >&2
+echo "codex-worker: cache=$CACHE_DIR" >&2
+echo "codex-worker: running codex exec..." >&2
 
-# Portable epoch-to-ISO8601 formatter (GNU date -d vs BSD date -r)
 epoch_to_iso() {
     local epoch="$1"
     date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
@@ -311,33 +300,31 @@ epoch_to_iso() {
 START_TIME=$(date +%s)
 
 CODEX_EXIT_CODE=0
-printf '%s' "$FINAL_PROMPT" | run_with_timeout "$CODEX_TIMEOUT" codex exec "${CODEX_EXEC_ARGS[@]}" - \
+printf '%s' "$FINAL_PROMPT" | run_with_timeout "$WORKER_TIMEOUT" codex exec "${CODEX_EXEC_ARGS[@]}" - \
     > "$CODEX_STDOUT_FILE" 2> "$CODEX_STDERR_FILE" || CODEX_EXIT_CODE=$?
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
 
-echo "ask-codex: exit_code=$CODEX_EXIT_CODE duration=${DURATION}s" >&2
+echo "codex-worker: exit_code=$CODEX_EXIT_CODE duration=${DURATION}s" >&2
 
 # ========================================
 # Handle Results
 # ========================================
 
-# Check for timeout
 if [[ $CODEX_EXIT_CODE -eq 124 ]]; then
-    echo "Error: Codex timed out after ${CODEX_TIMEOUT} seconds" >&2
+    echo "Error: Codex worker timed out after ${WORKER_TIMEOUT} seconds" >&2
     echo "" >&2
     echo "Try increasing the timeout:" >&2
-    echo "  /humanize:ask-codex --codex-timeout $((CODEX_TIMEOUT * 2)) <your question>" >&2
+    echo "  /humanize:codex-worker --worker-timeout $((WORKER_TIMEOUT * 2)) <your task>" >&2
     echo "" >&2
     echo "Debug logs: $CACHE_DIR" >&2
 
-    # Save metadata even on timeout
     cat > "$SKILL_DIR/metadata.md" << EOF
 ---
-model: $CODEX_MODEL
-effort: $CODEX_EFFORT
-timeout: $CODEX_TIMEOUT
+model: $WORKER_MODEL
+effort: $WORKER_EFFORT
+timeout: $WORKER_TIMEOUT
 exit_code: 124
 duration: ${DURATION}s
 status: timeout
@@ -347,9 +334,8 @@ EOF
     exit 124
 fi
 
-# Check for non-zero exit
 if [[ $CODEX_EXIT_CODE -ne 0 ]]; then
-    echo "Error: Codex exited with code $CODEX_EXIT_CODE" >&2
+    echo "Error: Codex worker exited with code $CODEX_EXIT_CODE" >&2
     if [[ -s "$CODEX_STDERR_FILE" ]]; then
         echo "" >&2
         echo "Codex stderr (last 20 lines):" >&2
@@ -358,12 +344,11 @@ if [[ $CODEX_EXIT_CODE -ne 0 ]]; then
     echo "" >&2
     echo "Debug logs: $CACHE_DIR" >&2
 
-    # Save metadata
     cat > "$SKILL_DIR/metadata.md" << EOF
 ---
-model: $CODEX_MODEL
-effort: $CODEX_EFFORT
-timeout: $CODEX_TIMEOUT
+model: $WORKER_MODEL
+effort: $WORKER_EFFORT
+timeout: $WORKER_TIMEOUT
 exit_code: $CODEX_EXIT_CODE
 duration: ${DURATION}s
 status: error
@@ -373,9 +358,8 @@ EOF
     exit "$CODEX_EXIT_CODE"
 fi
 
-# Check for empty stdout
 if [[ ! -s "$CODEX_STDOUT_FILE" ]]; then
-    echo "Error: Codex returned empty response" >&2
+    echo "Error: Codex worker returned empty response" >&2
     if [[ -s "$CODEX_STDERR_FILE" ]]; then
         echo "" >&2
         echo "Codex stderr (last 20 lines):" >&2
@@ -386,9 +370,9 @@ if [[ ! -s "$CODEX_STDOUT_FILE" ]]; then
 
     cat > "$SKILL_DIR/metadata.md" << EOF
 ---
-model: $CODEX_MODEL
-effort: $CODEX_EFFORT
-timeout: $CODEX_TIMEOUT
+model: $WORKER_MODEL
+effort: $WORKER_EFFORT
+timeout: $WORKER_TIMEOUT
 exit_code: 0
 duration: ${DURATION}s
 status: empty_response
@@ -402,15 +386,13 @@ fi
 # Save Output and Metadata
 # ========================================
 
-# Save Codex response to project-local storage
 cp "$CODEX_STDOUT_FILE" "$SKILL_DIR/output.md"
 
-# Save metadata
 cat > "$SKILL_DIR/metadata.md" << EOF
 ---
-model: $CODEX_MODEL
-effort: $CODEX_EFFORT
-timeout: $CODEX_TIMEOUT
+model: $WORKER_MODEL
+effort: $WORKER_EFFORT
+timeout: $WORKER_TIMEOUT
 exit_code: 0
 duration: ${DURATION}s
 status: success
@@ -418,11 +400,11 @@ started_at: $(epoch_to_iso "$START_TIME")
 ---
 EOF
 
-echo "ask-codex: response saved to $SKILL_DIR/output.md" >&2
+echo "codex-worker: response saved to $SKILL_DIR/output.md" >&2
 
 # ========================================
 # Output Response
 # ========================================
 
-# Output Codex's response to stdout (clean output for Claude to read)
 cat "$CODEX_STDOUT_FILE"
+

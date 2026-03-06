@@ -149,7 +149,7 @@ EOF
 ---
 current_round: 0
 max_iterations: 10
-codex_model: reviewer-model-placeholder
+codex_model: gpt-5.2
 codex_effort: xhigh
 codex_timeout: 5400
 push_every_round: false
@@ -185,6 +185,11 @@ EOF
 # Round 0 Summary
 
 More work remains.
+
+## BitLesson Delta
+- Action: none
+- Lesson ID(s): NONE
+- Notes: No new lessons in this test fixture.
 EOF
 }
 

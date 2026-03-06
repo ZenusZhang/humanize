@@ -40,11 +40,17 @@ readonly FIELD_SESSION_ID="session_id"
 readonly FIELD_AGENT_TEAMS="agent_teams"
 
 # Default Codex configuration (single source of truth - all scripts reference this)
-# Both use :- so scripts can override before sourcing (e.g. PR loop sets different model/effort).
+# Both use :- so scripts can override before sourcing when needed.
 #
-# Default model for Codex operations (same model for both plugin and skill mode)
-DEFAULT_CODEX_MODEL="${DEFAULT_CODEX_MODEL:-gpt-5.4}"
+# Role split:
+# - Analyzer/Reviewer: gpt-5.2 (non-codex)
+# - Worker (implementation): gpt-5.3-codex
+DEFAULT_CODEX_MODEL="${DEFAULT_CODEX_MODEL:-gpt-5.2}"
 DEFAULT_CODEX_EFFORT="${DEFAULT_CODEX_EFFORT:-xhigh}"
+
+# Default worker configuration (used by /humanize:codex-worker).
+DEFAULT_CODEX_WORKER_MODEL="${DEFAULT_CODEX_WORKER_MODEL:-gpt-5.3-codex}"
+DEFAULT_CODEX_WORKER_EFFORT="${DEFAULT_CODEX_WORKER_EFFORT:-xhigh}"
 
 # Codex review markers
 readonly MARKER_COMPLETE="COMPLETE"

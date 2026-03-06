@@ -91,23 +91,23 @@ OPTIONS:
   -h, --help           Show this help message
 
 DESCRIPTION:
-  Starts an iterative loop with Codex review in your CURRENT session.
+  Starts an iterative loop with a Codex CLI implementation worker and Codex review in your CURRENT session.
   This command:
 
   1. Takes a markdown plan file as input (not a prompt string)
-  2. Uses Codex to independently review Claude's work each iteration
+  2. Uses Codex to independently review implementation progress each iteration (cross-vendor style, even if models are from the same provider)
   3. Has two phases: Implementation Phase and Review Phase
 
   The flow:
-  1. Claude executes plan tasks with tag-based routing (Implementation Phase)
-     - `coding` tasks: Claude implements directly
-     - `analyze` tasks: Claude delegates execution via `/humanize:ask-codex`
-  2. Claude writes a summary to round-N-summary.md
+  1. Execute plan tasks with tag-based routing (Implementation Phase)
+     - `coding` tasks: execute via `/humanize:codex-worker`
+     - `analyze` tasks: execute via `/humanize:ask-codex`
+  2. Write a summary to round-N-summary.md
   3. On exit attempt, Codex reviews the summary
   4. If Codex finds issues, it blocks exit and sends feedback
   5. If Codex outputs "COMPLETE", enters Review Phase
   6. In Review Phase, codex review checks code quality with [P0-9] markers
-  7. If code review finds issues, Claude fixes them
+  7. If code review finds issues, execute fixes via `/humanize:codex-worker`
   8. When no issues found, enters Finalize Phase and loop ends
 
 EXAMPLES:
@@ -912,7 +912,7 @@ AC_SECTION=$({ sed -n '/^##[[:space:]]*[Aa]cceptance\|^##[[:space:]]*[Cc]riteria
 if [[ -n "$AC_SECTION" ]]; then
     echo "$AC_SECTION" >> "$GOAL_TRACKER_FILE"
 else
-    echo "[To be defined by Claude in Round 0 based on the plan]" >> "$GOAL_TRACKER_FILE"
+    echo "[To be defined by coordinator in Round 0 based on the plan]" >> "$GOAL_TRACKER_FILE"
 fi
 
 cat >> "$GOAL_TRACKER_FILE" << 'GOAL_TRACKER_EOF'
@@ -934,7 +934,7 @@ cat >> "$GOAL_TRACKER_FILE" << 'GOAL_TRACKER_EOF'
 <!-- Map each task to its target Acceptance Criterion and routing tag -->
 | Task | Target AC | Status | Tag | Owner | Notes |
 |------|-----------|--------|-----|-------|-------|
-| [To be populated by Claude based on plan] | - | pending | coding or analyze | claude or codex | - |
+| [To be populated by coordinator based on plan] | - | pending | coding or analyze | worker or analyzer | - |
 
 ### Completed and Verified
 <!-- Only move tasks here after Codex verification -->
@@ -979,11 +979,16 @@ Do not try to execute anything to trigger the review - just stop and it will run
 
 ## Your Task
 
-1. Review your current work
-2. When ready, try to exit - Codex will review your code
-3. Fix any issues Codex finds
-4. Repeat until no issues remain
-5. Enter finalize phase for code simplification
+1. Read @$BITLESSON_FILE before applying any fixes
+2. For each fix task/sub-task, run the \`bitlesson-selector\` agent first and apply selected lesson IDs (or \`NONE\`)
+3. For every sub-agent invocation, include explicit cross-vendor review context in the prompt:
+   - "your output will be reviewed independently (cross-vendor style)", or
+   - "you are reviewing findings/results produced by an independent worker (cross-vendor style)"
+4. Review your current work
+5. When ready, try to exit - Codex will review your code
+6. Fix any issues Codex finds
+7. Repeat until no issues remain
+8. Enter finalize phase for code simplification
 
 ## Note
 
@@ -1021,13 +1026,19 @@ Before starting implementation, you MUST initialize the Goal Tracker:
 For all tasks that need to be completed, please use the Task system (TaskCreate, TaskUpdate, TaskList) to track each item in order of importance.
 You are strictly prohibited from only addressing the most important issues - you MUST create Tasks for ALL discovered issues and attempt to resolve each one.
 
+## Sub-Agent Cross-Review Protocol (MANDATORY)
+
+For every sub-agent invocation in this round (Task agents, \`bitlesson-selector\`, code-simplifier, etc.), include explicit cross-vendor review context in the prompt (even if all models are from the same provider today):
+- Either: "Your output will be reviewed by an independent reviewer (cross-vendor style)."
+- Or: "You are reviewing findings/results produced by an independent worker (cross-vendor style)."
+
 ## Task Tag Routing (MUST FOLLOW)
 
 Each task must have one routing tag from the plan: \`coding\` or \`analyze\`.
 
-- Tag \`coding\`: Claude executes the task directly.
-- Tag \`analyze\`: Claude must execute via \`/humanize:ask-codex\`, then integrate Codex output.
-- Keep Goal Tracker "Active Tasks" columns **Tag** and **Owner** aligned with execution (\`coding -> claude\`, \`analyze -> codex\`).
+- Tag \`coding\`: execute via \`/humanize:codex-worker\` (default: \`gpt-5.3-codex:xhigh\`).
+- Tag \`analyze\`: execute via \`/humanize:ask-codex\` (default: \`gpt-5.2:xhigh\`), then integrate the result.
+- Keep Goal Tracker "Active Tasks" columns **Tag** and **Owner** aligned with execution (\`coding -> worker\`, \`analyze -> analyzer\`).
 - If a task is missing a valid tag, do not guess silently; document it in Plan Evolution Log and block completion until clarified.
 
 EOF
@@ -1054,7 +1065,29 @@ You are operating in **Agent Teams mode** as the **Team Leader**.
 Split tasks into independent units, create agent teams to execute them, and coordinate team members.
 Do NOT do implementation work yourself - delegate all coding to team members.
 Prevent overlapping changes by assigning clear file ownership boundaries.
+Every worker/analyzer/reviewer prompt must include explicit independent review context (cross-vendor style).
 AGENT_TEAMS_EOF
+    fi
+fi
+
+# Inject worktree-specific orchestration instructions (requires agent teams)
+if [[ "$WORKTREE_TEAMS" == "true" ]]; then
+    WORKTREE_TEAMS_TEMPLATE="$TEMPLATE_DIR/claude/worktree-teams-instructions.md"
+    if [[ -f "$WORKTREE_TEAMS_TEMPLATE" ]]; then
+        echo "" >> "$LOOP_DIR/round-0-prompt.md"
+        cat "$WORKTREE_TEAMS_TEMPLATE" >> "$LOOP_DIR/round-0-prompt.md"
+    else
+        cat >> "$LOOP_DIR/round-0-prompt.md" << 'WORKTREE_TEAMS_EOF'
+
+## Document-Centered Worktree Mode
+
+Coordination must be driven by project docs (`plan.md`, `goal-tracker.md`, `worktree-assignment.md`).
+Explicitly mark every task as parallelizable (`yes` or `no`) in the planning docs, then assign
+parallelizable tasks to isolated `git worktree` lanes for worker/reviewer pairs and record lane
+ownership in `worktree-assignment.md`.
+Use `scripts/setup-worktree-teams.sh` to provision worktrees and record assignments before coding.
+Each worker/reviewer prompt must explicitly state cross-vendor-style review context.
+WORKTREE_TEAMS_EOF
     fi
 fi
 
@@ -1085,7 +1118,7 @@ Throughout your work, you MUST maintain the Goal Tracker:
 Note: You MUST NOT try to exit \`start-rlcr-loop\` loop by lying or edit loop state file or try to execute \`cancel-rlcr-loop\`
 
 After completing the work, please:
-0. If you have access to the \`code-simplifier\` agent, use it to review and optimize the code you just wrote
+0. If you have access to the \`code-simplifier\` agent, use it to review and optimize the code you just wrote. Include explicit cross-vendor-style review context in that sub-agent prompt.
 1. Finalize @$GOAL_TRACKER_FILE (this is Round 0, so you are initializing it - see "Goal Tracker Setup" above)
 2. Commit your changes with a descriptive commit message
 3. Write your work summary into @$SUMMARY_PATH
