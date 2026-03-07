@@ -110,7 +110,7 @@ fi
 PROMPT="$(cat <<EOF
 # BitLesson Selector
 
-You select which lessons from \`bitlesson.md\` must be applied for a given sub-task.
+You select which lessons from the configured BitLesson file (normally \`.humanize/bitlesson.md\`) must be applied for a given sub-task.
 
 ## Input
 
@@ -120,7 +120,7 @@ $TASK
 Related file paths (comma-separated):
 $PATHS
 
-Project \`bitlesson.md\` content:
+BitLesson file content:
 <<<BEGIN_BITLESSON_MD
 $BITLESSON_CONTENT
 <<<END_BITLESSON_MD
@@ -146,7 +146,7 @@ EOF
 
 SELECTOR_TIMEOUT=120
 
-CODEX_EXEC_ARGS=("-m" "gpt-5.2" "-c" "model_reasoning_effort=high")
+CODEX_EXEC_ARGS=("-m" "gpt-5.4" "-c" "model_reasoning_effort=high")
 
 # Determine automation flag based on environment variable (same as ask-codex.sh)
 CODEX_AUTO_FLAG="--full-auto"

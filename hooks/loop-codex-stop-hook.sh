@@ -155,7 +155,7 @@ BITLESSON_REQUIRED="false"
 if [[ -n "$RAW_BITLESSON_REQUIRED" ]]; then
     BITLESSON_REQUIRED=$(echo "$RAW_BITLESSON_REQUIRED" | sed 's/^bitlesson_required:[[:space:]]*//' | tr -d ' "')
 fi
-BITLESSON_FILE_REL="bitlesson.md"
+BITLESSON_FILE_REL=".humanize/bitlesson.md"
 if [[ -n "$RAW_BITLESSON_FILE" ]]; then
     BITLESSON_FILE_REL=$(echo "$RAW_BITLESSON_FILE" | sed 's/^bitlesson_file:[[:space:]]*//' | sed 's/^"//; s/"$//')
 fi
@@ -163,7 +163,7 @@ if [[ -z "$BITLESSON_FILE_REL" ]] || \
    [[ ! "$BITLESSON_FILE_REL" =~ ^[a-zA-Z0-9._/-]+$ ]] || \
    [[ "$BITLESSON_FILE_REL" = /* ]] || \
    [[ "$BITLESSON_FILE_REL" =~ (^|/)\.\.(/|$) ]]; then
-    BITLESSON_FILE_REL="bitlesson.md"
+    BITLESSON_FILE_REL=".humanize/bitlesson.md"
 fi
 BITLESSON_FILE="$PROJECT_ROOT/$BITLESSON_FILE_REL"
 if [[ "$BITLESSON_REQUIRED" != "true" && -f "$BITLESSON_FILE" ]]; then
@@ -1370,8 +1370,8 @@ append_task_tag_routing_note() {
 ## Task Tag Routing Reminder
 
 Follow the plan's per-task routing tags strictly:
-- `coding` task -> execute via `/humanize:codex-worker` (default: `gpt-5.3-codex:xhigh`)
-- `analyze` task -> execute via `/humanize:ask-codex` (default: `gpt-5.2:xhigh`), then integrate the result
+- `coding` task -> execute via `/humanize:codex-worker` (default: `gpt-5.4:xhigh`)
+- `analyze` task -> execute via `/humanize:ask-codex` (default: `gpt-5.4:xhigh`), then integrate the result
 - Keep Goal Tracker Active Tasks columns `Tag` and `Owner` aligned with execution
 ROUTING_EOF
 }
