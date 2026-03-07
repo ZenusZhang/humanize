@@ -49,7 +49,14 @@ FULL_REVIEW_ROUND="$DEFAULT_FULL_REVIEW_ROUND"
 SKIP_IMPL="false"
 SKIP_IMPL_NO_PLAN="false"
 ASK_CODEX_QUESTION="true"
-AGENT_TEAMS="false"
+# Default to team orchestration on; users can opt out with --no-agent-teams/--no-worktree-teams.
+AGENT_TEAMS="true"
+WORKTREE_TEAMS="true"
+AGENT_TEAMS_EXPLICIT="false"
+WORKTREE_TEAMS_EXPLICIT="false"
+WORKTREE_ROOT=""
+BITLESSON_ALLOW_EMPTY_NONE="true"
+DELEGATION_ENFORCEMENT="${HUMANIZE_CODEX_DELEGATION_ENFORCEMENT:-warn}"
 
 show_help() {
     cat <<HELP_EOF
@@ -86,8 +93,25 @@ OPTIONS:
                        your plan that deserve human clarification. By default,
                        Claude asks user for clarification, which is preferred.
   --agent-teams        Enable Claude Code Agent Teams mode for parallel development.
-                       Requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 environment variable.
-                       Claude acts as team leader, splitting tasks among team members.
+                       Enabled by default when supported.
+  --no-agent-teams     Disable Agent Teams mode for this loop.
+  --worktree-teams     Enable document-centered worktree orchestration via git worktree.
+                       Enabled by default when Agent Teams is enabled.
+  --no-worktree-teams  Disable worktree orchestration for this loop.
+  --agent-teams requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1.
+  --worktree-teams also requires path canonicalization support
+                       (python3 preferred, or GNU readlink with -f/-m).
+  --worktree-root <PATH>
+                       Root directory for generated worktrees (default: .humanize/worktrees/<loop-timestamp>)
+  --allow-empty-bitlesson-none
+                       Allow `Action: none` even if `bitlesson.md` has no concrete entries
+                       (default: enabled)
+  --require-bitlesson-entry-for-none
+                       Enforce strict mode: in round > 0, `Action: none` requires at least
+                       one concrete lesson entry in `bitlesson.md`
+  HUMANIZE_CODEX_DELEGATION_ENFORCEMENT
+                       Delegation enforcement level for agent-team prompting.
+                       Allowed values: warn, strict (default: warn)
   -h, --help           Show this help message
 
 DESCRIPTION:
@@ -115,6 +139,10 @@ EXAMPLES:
   /humanize:start-rlcr-loop docs/impl.md --max 20
   /humanize:start-rlcr-loop plan.md --codex-model ${DEFAULT_CODEX_MODEL}:${DEFAULT_CODEX_EFFORT}
   /humanize:start-rlcr-loop plan.md --codex-timeout 7200  # 2 hour timeout
+  /humanize:start-rlcr-loop plan.md --agent-teams --worktree-teams
+  /humanize:start-rlcr-loop plan.md
+  /humanize:start-rlcr-loop plan.md --no-worktree-teams
+  /humanize:start-rlcr-loop plan.md --no-agent-teams
 
 STOPPING:
   - /humanize:cancel-rlcr-loop   Cancel the active loop
@@ -228,6 +256,38 @@ while [[ $# -gt 0 ]]; do
             ;;
         --agent-teams)
             AGENT_TEAMS="true"
+            AGENT_TEAMS_EXPLICIT="true"
+            shift
+            ;;
+        --no-agent-teams)
+            AGENT_TEAMS="false"
+            AGENT_TEAMS_EXPLICIT="true"
+            shift
+            ;;
+        --worktree-teams)
+            WORKTREE_TEAMS="true"
+            WORKTREE_TEAMS_EXPLICIT="true"
+            shift
+            ;;
+        --no-worktree-teams)
+            WORKTREE_TEAMS="false"
+            WORKTREE_TEAMS_EXPLICIT="true"
+            shift
+            ;;
+        --worktree-root)
+            if [[ -z "${2:-}" ]] || [[ "${2:-}" == -* ]]; then
+                echo "Error: --worktree-root requires a relative path argument" >&2
+                exit 1
+            fi
+            WORKTREE_ROOT="$2"
+            shift 2
+            ;;
+        --allow-empty-bitlesson-none)
+            BITLESSON_ALLOW_EMPTY_NONE="true"
+            shift
+            ;;
+        --require-bitlesson-entry-for-none)
+            BITLESSON_ALLOW_EMPTY_NONE="false"
             shift
             ;;
         -*)
@@ -248,6 +308,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Validate delegation enforcement level from environment
+if [[ "$DELEGATION_ENFORCEMENT" != "warn" && "$DELEGATION_ENFORCEMENT" != "strict" ]]; then
+    echo "Error: HUMANIZE_CODEX_DELEGATION_ENFORCEMENT must be 'warn' or 'strict', got: $DELEGATION_ENFORCEMENT" >&2
+    exit 1
+fi
+
 # ========================================
 # Validate Prerequisites
 # ========================================
@@ -255,37 +321,6 @@ done
 PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 # loop-common.sh already sourced above (provides find_active_loop, find_active_pr_loop, etc.)
-
-# ========================================
-# Required Dependency Check
-# ========================================
-# Check all required external tools upfront so users get a single,
-# actionable error message instead of a cryptic mid-loop failure.
-
-MISSING_DEPS=()
-
-if ! command -v codex &>/dev/null; then
-    MISSING_DEPS+=("codex  - Install: https://github.com/openai/codex")
-fi
-
-if ! command -v jq &>/dev/null; then
-    MISSING_DEPS+=("jq     - Install: https://jqlang.github.io/jq/download/")
-fi
-
-if ! command -v git &>/dev/null; then
-    MISSING_DEPS+=("git    - Install: https://git-scm.com/downloads")
-fi
-
-if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
-    echo "Error: Missing required dependencies for RLCR loop" >&2
-    echo "" >&2
-    for dep in "${MISSING_DEPS[@]}"; do
-        echo "  - $dep" >&2
-    done
-    echo "" >&2
-    echo "Please install the missing tools and try again." >&2
-    exit 1
-fi
 
 # ========================================
 # Mutual Exclusion Check
@@ -318,16 +353,84 @@ fi
 # Agent Teams Validation
 # ========================================
 
+# Skip-impl mode does not run implementation orchestration; disable default team modes
+# unless the user explicitly forced them.
+if [[ "$SKIP_IMPL" == "true" ]]; then
+    if [[ "$WORKTREE_TEAMS" == "true" && "$WORKTREE_TEAMS_EXPLICIT" != "true" ]]; then
+        echo "Warning: --skip-impl disables default worktree teams mode." >&2
+        WORKTREE_TEAMS="false"
+    fi
+    if [[ "$AGENT_TEAMS" == "true" && "$AGENT_TEAMS_EXPLICIT" != "true" ]]; then
+        echo "Warning: --skip-impl disables default agent teams mode." >&2
+        AGENT_TEAMS="false"
+    fi
+fi
+
 if [[ "$AGENT_TEAMS" == "true" ]]; then
     if [[ "${CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:-}" != "1" ]]; then
-        echo "Error: --agent-teams requires the CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS environment variable to be set." >&2
-        echo "" >&2
-        echo "Claude Code Agent Teams is an experimental feature that must be enabled before use." >&2
-        echo "To enable it, set the environment variable before starting Claude Code:" >&2
-        echo "" >&2
-        echo "  export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1" >&2
-        echo "" >&2
-        echo "Or add it to your shell profile (~/.bashrc, ~/.zshrc) for persistent access." >&2
+        if [[ "$AGENT_TEAMS_EXPLICIT" == "true" ]]; then
+            echo "Error: --agent-teams requires the CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS environment variable to be set." >&2
+            echo "" >&2
+            echo "Claude Code Agent Teams is an experimental feature that must be enabled before use." >&2
+            echo "To enable it, set the environment variable before starting Claude Code:" >&2
+            echo "" >&2
+            echo "  export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1" >&2
+            echo "" >&2
+            echo "Or add it to your shell profile (~/.bashrc, ~/.zshrc) for persistent access." >&2
+            exit 1
+        fi
+        echo "Warning: CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS is not enabled; default agent/worktree teams are disabled for this run." >&2
+        AGENT_TEAMS="false"
+        if [[ "$WORKTREE_TEAMS_EXPLICIT" != "true" ]]; then
+            WORKTREE_TEAMS="false"
+        fi
+    fi
+fi
+
+if [[ "$WORKTREE_TEAMS" == "true" && "$AGENT_TEAMS" != "true" ]]; then
+    if [[ "$WORKTREE_TEAMS_EXPLICIT" == "true" ]]; then
+        echo "Error: --worktree-teams requires --agent-teams" >&2
+        exit 1
+    fi
+    WORKTREE_TEAMS="false"
+fi
+
+if [[ "$WORKTREE_TEAMS" == "true" && "$SKIP_IMPL" == "true" ]]; then
+    echo "Error: --worktree-teams cannot be used with --skip-impl" >&2
+    echo "  Worktree orchestration is only meaningful during implementation rounds." >&2
+    exit 1
+fi
+
+if [[ -n "$WORKTREE_ROOT" && "$WORKTREE_TEAMS" != "true" ]]; then
+    echo "Error: --worktree-root requires --worktree-teams" >&2
+    exit 1
+fi
+
+if [[ -n "$WORKTREE_ROOT" ]]; then
+    # Normalize before validation so variants like "./", ".//", "./.git" are caught.
+    while [[ "$WORKTREE_ROOT" == ./* ]]; do
+        WORKTREE_ROOT="${WORKTREE_ROOT#./}"
+    done
+    while [[ "$WORKTREE_ROOT" == *"//"* ]]; do
+        WORKTREE_ROOT="${WORKTREE_ROOT//\/\//\/}"
+    done
+    WORKTREE_ROOT="${WORKTREE_ROOT%/}"
+
+    if [[ "$WORKTREE_ROOT" = /* ]]; then
+        echo "Error: --worktree-root must be a relative path, got: $WORKTREE_ROOT" >&2
+        exit 1
+    fi
+    if [[ ! "$WORKTREE_ROOT" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+        echo "Error: --worktree-root contains unsupported characters, got: $WORKTREE_ROOT" >&2
+        echo "  Allowed characters: letters, numbers, dot, underscore, slash, hyphen" >&2
+        exit 1
+    fi
+    if [[ "$WORKTREE_ROOT" =~ (^|/)\.\.(/|$) ]]; then
+        echo "Error: --worktree-root must stay within the project directory, got: $WORKTREE_ROOT" >&2
+        exit 1
+    fi
+    if [[ -z "$WORKTREE_ROOT" || "$WORKTREE_ROOT" == "." || "$WORKTREE_ROOT" == ".git" || "$WORKTREE_ROOT" == .git/* ]]; then
+        echo "Error: --worktree-root must not target repository root or .git internals: $WORKTREE_ROOT" >&2
         exit 1
     fi
 fi
@@ -611,6 +714,14 @@ else
     LINE_COUNT=0
 fi  # End of skip-impl plan file content validation skip
 
+# Check codex is available
+if ! command -v codex &>/dev/null; then
+    echo "Error: start-rlcr-loop requires codex to run" >&2
+    echo "" >&2
+    echo "Please install Codex CLI: https://openai.com/codex" >&2
+    exit 1
+fi
+
 # ========================================
 # Record Branch
 # ========================================
@@ -660,14 +771,18 @@ if [[ $GIT_STATUS_EXIT -eq 124 ]]; then
     echo "Error: Git operation timed out while checking working tree status" >&2
     exit 1
 fi
-if [[ -n "$GIT_STATUS_OUTPUT" ]]; then
+GIT_STATUS_FILTERED="$GIT_STATUS_OUTPUT"
+# Ignore untracked project-level bitlesson.md generated by this workflow.
+# This keeps repeated loop starts functional without forcing immediate commits.
+GIT_STATUS_FILTERED=$(echo "$GIT_STATUS_FILTERED" | grep -vE '^\?\? bitlesson\.md$' || true)
+if [[ -n "$GIT_STATUS_FILTERED" ]]; then
     echo "Error: Git working tree is not clean" >&2
     echo "" >&2
     echo "RLCR loop can only be started on a clean git repository." >&2
     echo "Please commit or stash your changes before starting the loop." >&2
     echo "" >&2
     echo "Current status:" >&2
-    echo "$GIT_STATUS_OUTPUT" >&2
+    echo "$GIT_STATUS_FILTERED" >&2
     exit 1
 fi
 
@@ -755,6 +870,49 @@ LOOP_BASE_DIR="$PROJECT_ROOT/.humanize/rlcr"
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 LOOP_DIR="$LOOP_BASE_DIR/$TIMESTAMP"
 
+# Resolve worktree root after timestamp is known
+if [[ "$WORKTREE_TEAMS" == "true" ]]; then
+    if [[ -z "$WORKTREE_ROOT" ]]; then
+        WORKTREE_ROOT=".humanize/worktrees/$TIMESTAMP"
+    fi
+    # Strip trailing slash for consistency in state file and prompts
+    WORKTREE_ROOT="${WORKTREE_ROOT%/}"
+
+    # Resolve symlinks before creation so relative roots cannot escape project via symlinked parents
+    PROJECT_ROOT_REAL=$(cd "$PROJECT_ROOT" && pwd -P)
+    WORKTREE_TARGET_PATH="$PROJECT_ROOT/$WORKTREE_ROOT"
+    if command -v python3 >/dev/null 2>&1; then
+        WORKTREE_TARGET_REAL=$(python3 - "$WORKTREE_TARGET_PATH" <<'PY'
+import os
+import sys
+print(os.path.realpath(sys.argv[1]))
+PY
+)
+    elif command -v readlink >/dev/null 2>&1; then
+        # Prefer -f; fall back to -m for paths with missing parents.
+        WORKTREE_TARGET_REAL=$(readlink -f "$WORKTREE_TARGET_PATH" 2>/dev/null || readlink -m "$WORKTREE_TARGET_PATH" 2>/dev/null || echo "")
+    else
+        WORKTREE_TARGET_REAL=""
+    fi
+
+    if [[ -z "$WORKTREE_TARGET_REAL" ]]; then
+        echo "Error: Unable to resolve canonical path for worktree root: $WORKTREE_TARGET_PATH" >&2
+        echo "  Install python3 or readlink with -f support to use --worktree-teams." >&2
+        exit 1
+    fi
+
+    if [[ "$WORKTREE_TARGET_REAL" != "$PROJECT_ROOT_REAL" && "$WORKTREE_TARGET_REAL" != "$PROJECT_ROOT_REAL/"* ]]; then
+        echo "Error: --worktree-root resolves outside project root via symlink traversal." >&2
+        echo "  Root: $WORKTREE_TARGET_REAL" >&2
+        echo "  Project: $PROJECT_ROOT_REAL" >&2
+        exit 1
+    fi
+
+    mkdir -p "$WORKTREE_TARGET_PATH"
+else
+    WORKTREE_ROOT=""
+fi
+
 mkdir -p "$LOOP_DIR"
 
 # Copy plan file to loop directory as backup (or create placeholder for skip-impl)
@@ -785,6 +943,20 @@ fi
 DOCS_PATH="docs"
 
 # ========================================
+# Initialize Project BitLesson File
+# ========================================
+
+BITLESSON_FILE_REL="bitlesson.md"
+BITLESSON_FILE="$PROJECT_ROOT/$BITLESSON_FILE_REL"
+PLUGIN_BITLESSON_TEMPLATE="$SCRIPT_DIR/../templates/bitlesson.md"
+
+# Use extracted init script
+bash "$SCRIPT_DIR/bitlesson-init.sh" \
+    --project-root "$PROJECT_ROOT" \
+    --template "$PLUGIN_BITLESSON_TEMPLATE" \
+    --bitlesson-relpath "$BITLESSON_FILE_REL" > /dev/null
+
+# ========================================
 # Create State File
 # ========================================
 
@@ -809,9 +981,43 @@ review_started: $INITIAL_REVIEW_STARTED
 ask_codex_question: $ASK_CODEX_QUESTION
 session_id:
 agent_teams: $AGENT_TEAMS
+worktree_teams: $WORKTREE_TEAMS
+worktree_root: $WORKTREE_ROOT
+delegation_enforcement: $DELEGATION_ENFORCEMENT
+bitlesson_required: true
+bitlesson_file: $BITLESSON_FILE_REL
+bitlesson_allow_empty_none: $BITLESSON_ALLOW_EMPTY_NONE
 started_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 ---
 EOF
+
+# ========================================
+# Worktree Teams Preflight (Feature 2)
+# ========================================
+# Guarantee document-centered artifacts exist before Round 0 starts.
+if [[ "$WORKTREE_TEAMS" == "true" ]]; then
+    WORKTREE_SETUP_SCRIPT="$SCRIPT_DIR/setup-worktree-teams.sh"
+    if [[ ! -f "$WORKTREE_SETUP_SCRIPT" ]]; then
+        echo "Error: Worktree setup script not found: $WORKTREE_SETUP_SCRIPT" >&2
+        exit 1
+    fi
+
+    echo "Preflight: provisioning worktree lanes and assignment mapping..." >&2
+    WORKTREE_SETUP_CMD=(bash "$WORKTREE_SETUP_SCRIPT" --loop-dir "$LOOP_DIR")
+    if [[ -n "$WORKTREE_ROOT" ]]; then
+        WORKTREE_SETUP_CMD+=(--worktree-root "$WORKTREE_ROOT")
+    fi
+    if ! CLAUDE_PROJECT_DIR="$PROJECT_ROOT" "${WORKTREE_SETUP_CMD[@]}" >/dev/null; then
+        echo "Error: Worktree teams preflight failed." >&2
+        echo "  Expected to create lane worktrees and worktree-assignment.md before loop starts." >&2
+        exit 1
+    fi
+
+    if [[ ! -s "$LOOP_DIR/worktree-assignment.md" ]]; then
+        echo "Error: worktree-assignment.md was not created or is empty after preflight." >&2
+        exit 1
+    fi
+fi
 
 # Create signal file for PostToolUse hook to record session_id
 # The hook will read the session_id from its JSON input and patch state.md
@@ -960,6 +1166,44 @@ fi  # End of skip-impl goal tracker handling
 
 SUMMARY_PATH="$LOOP_DIR/round-0-summary.md"
 
+write_summary_template() {
+    local target_file="$1"
+    local phase_label="$2"
+    local include_bitlesson="$3"
+
+    if [[ -f "$target_file" ]]; then
+        return 0
+    fi
+
+    cat > "$target_file" << EOF
+# ${phase_label} Summary
+
+## Work Completed
+- [Describe what was implemented in this phase]
+
+## Files Changed
+- [List created/modified files]
+
+## Validation
+- [List tests/commands run and outcomes]
+
+## Remaining Items
+- [List unresolved items, if any]
+EOF
+
+    if [[ "$include_bitlesson" == "true" ]]; then
+        cat >> "$target_file" << 'EOF'
+
+## BitLesson Delta
+- Action: none|add|update
+- Lesson ID(s): NONE
+- Notes: [what changed and why]
+EOF
+    fi
+}
+
+write_summary_template "$SUMMARY_PATH" "Round 0" "true"
+
 if [[ "$SKIP_IMPL" == "true" ]]; then
     # Skip-impl mode: create a prompt for code review only
     cat > "$LOOP_DIR/round-0-prompt.md" << EOF
@@ -999,6 +1243,12 @@ When you're ready for review, write a brief summary of your changes and try to e
 
 Write your summary to: @$SUMMARY_PATH
 
+Include this section in your summary:
+## BitLesson Delta
+- Action: none|add|update
+- Lesson ID(s): <IDs or NONE>
+- Notes: <what changed and why>
+
 EOF
 else
     # Normal mode: create full implementation prompt
@@ -1018,6 +1268,17 @@ Before starting implementation, you MUST initialize the Goal Tracker:
 5. Write the updated goal-tracker.md
 
 **IMPORTANT**: The IMMUTABLE SECTION can only be modified in Round 0. After this round, it becomes read-only.
+
+---
+
+## BitLesson Selection (REQUIRED BEFORE EXECUTION)
+
+Before executing any task or sub-task:
+
+1. Read @$BITLESSON_FILE
+2. Run the \`bitlesson-selector\` agent with: current sub-task, related file paths, and \`bitlesson.md\`
+3. Capture selected lesson IDs (or \`NONE\`) in task notes and follow them during execution
+4. If a problem is solved only after multiple rounds, add/update a precise entry in \`bitlesson.md\`
 
 ---
 
@@ -1122,6 +1383,9 @@ After completing the work, please:
 1. Finalize @$GOAL_TRACKER_FILE (this is Round 0, so you are initializing it - see "Goal Tracker Setup" above)
 2. Commit your changes with a descriptive commit message
 3. Write your work summary into @$SUMMARY_PATH
+4. Include the summary section:
+   - \`## BitLesson Delta\`
+   - \`Action: none|add|update\`
 EOF
 
 # Add push instruction only if push_every_round is true
@@ -1153,6 +1417,7 @@ Codex Model: $CODEX_MODEL
 Codex Effort: $CODEX_EFFORT
 Codex Review Effort: high
 Codex Timeout: ${CODEX_TIMEOUT}s
+Delegation Enforcement: $DELEGATION_ENFORCEMENT
 Loop Directory: $LOOP_DIR
 
 Skip-impl mode is active. The implementation phase is skipped.
@@ -1183,6 +1448,10 @@ Codex Review Effort: high
 Codex Timeout: ${CODEX_TIMEOUT}s
 Full Review Round: $FULL_REVIEW_ROUND (Full Alignment Checks at rounds $((FULL_REVIEW_ROUND - 1)), $((2 * FULL_REVIEW_ROUND - 1)), $((3 * FULL_REVIEW_ROUND - 1)), ...)
 Ask User for Codex Questions: $ASK_CODEX_QUESTION
+Agent Teams: $AGENT_TEAMS
+Worktree Teams: $WORKTREE_TEAMS
+Worktree Root: ${WORKTREE_ROOT:-N/A}
+Delegation Enforcement: $DELEGATION_ENFORCEMENT
 Loop Directory: $LOOP_DIR
 
 The loop is now active. When you try to exit:

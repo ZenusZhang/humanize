@@ -94,6 +94,9 @@ RAW_FRONTMATTER=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$STATE_FILE" 2>/dev/
 RAW_CURRENT_ROUND=$(echo "$RAW_FRONTMATTER" | grep "^current_round:" || true)
 RAW_MAX_ITERATIONS=$(echo "$RAW_FRONTMATTER" | grep "^max_iterations:" || true)
 RAW_FULL_REVIEW_ROUND=$(echo "$RAW_FRONTMATTER" | grep "^full_review_round:" || true)
+RAW_BITLESSON_REQUIRED=$(echo "$RAW_FRONTMATTER" | grep "^bitlesson_required:" || true)
+RAW_BITLESSON_FILE=$(echo "$RAW_FRONTMATTER" | grep "^bitlesson_file:" || true)
+RAW_BITLESSON_ALLOW_EMPTY_NONE=$(echo "$RAW_FRONTMATTER" | grep "^bitlesson_allow_empty_none:" || true)
 
 # Use tolerant parsing to extract values
 # Note: parse_state_file applies defaults for missing current_round/max_iterations
@@ -294,6 +297,80 @@ if [[ -z "$RAW_FULL_REVIEW_ROUND" ]]; then
     echo "  To use configurable Full Alignment Check intervals, upgrade to humanize v1.5.2+" >&2
     echo "  and restart the RLCR loop with --full-review-round <N> option." >&2
 fi
+
+# ========================================
+# Helper Functions
+# ========================================
+
+estimate_hook_input_tokens() {
+    local hook_payload="$1"
+    local payload_bytes=""
+    payload_bytes=$(printf '%s' "$hook_payload" | wc -c | tr -d '[:space:]')
+    if [[ -z "$payload_bytes" ]] || ! [[ "$payload_bytes" =~ ^[0-9]+$ ]]; then
+        payload_bytes=0
+    fi
+    # Coarse tokenizer approximation for safety checks.
+    echo $(( (payload_bytes + 3) / 4 ))
+}
+
+write_context_guard_note() {
+    local estimated_tokens="$1"
+    local token_threshold="$2"
+    local note_file="$LOOP_DIR/context-guard-recovery.md"
+
+    cat > "$note_file" << EOF
+# Context Guard Recovery
+
+- Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+- Estimated Tokens: $estimated_tokens
+- Guard Threshold: $token_threshold
+- Loop Directory: $LOOP_DIR
+- Current Summary: $SUMMARY_FILE
+
+## Recovery Steps
+1. Start a fresh Claude session to reset context usage.
+2. Continue from loop docs: plan.md, goal-tracker.md, worktree-assignment.md, and current summary.
+3. Retry the stop flow after summarizing only net-new changes.
+EOF
+
+    echo "$note_file"
+}
+
+write_loop_summary_template() {
+    local target_file="$1"
+    local phase_label="$2"
+    local include_bitlesson="$3"
+
+    if [[ -f "$target_file" ]]; then
+        return 0
+    fi
+
+    cat > "$target_file" << EOF
+# ${phase_label} Summary
+
+## Work Completed
+- [Describe what was implemented in this phase]
+
+## Files Changed
+- [List created/modified files]
+
+## Validation
+- [List tests/commands run and outcomes]
+
+## Remaining Items
+- [List unresolved items, if any]
+EOF
+
+    if [[ "$include_bitlesson" == "true" ]]; then
+        cat >> "$target_file" << 'EOF'
+
+## BitLesson Delta
+- Action: none|add|update
+- Lesson ID(s): NONE
+- Notes: [what changed and why]
+EOF
+    fi
+}
 
 # ========================================
 # Quick-check 0.5: Branch Consistency
@@ -497,11 +574,11 @@ cleanup_stale_index_lock() {
 GIT_STATUS_CACHED=""
 GIT_IS_REPO=false
 
-if command -v git &>/dev/null && run_with_timeout "$GIT_TIMEOUT" git rev-parse --git-dir &>/dev/null 2>&1; then
+if command -v git &>/dev/null && run_with_timeout "$GIT_TIMEOUT" git -C "$PROJECT_ROOT" rev-parse --git-dir &>/dev/null 2>&1; then
     GIT_IS_REPO=true
     # Capture exit code to detect timeout/failure - do NOT use || echo "" which would fail-open
     GIT_STATUS_EXIT=0
-    GIT_STATUS_CACHED=$(run_with_timeout "$GIT_TIMEOUT" git status --porcelain 2>/dev/null) || GIT_STATUS_EXIT=$?
+    GIT_STATUS_CACHED=$(run_with_timeout "$GIT_TIMEOUT" git -C "$PROJECT_ROOT" status --porcelain 2>/dev/null) || GIT_STATUS_EXIT=$?
 
     if [[ $GIT_STATUS_EXIT -ne 0 ]]; then
         # Git status failed or timed out - fail-closed by blocking exit
@@ -673,10 +750,10 @@ Please commit all changes before exiting.
 
     if [[ "$PUSH_EVERY_ROUND" == "true" ]]; then
         # Check if local branch is ahead of remote (unpushed commits)
-        GIT_AHEAD=$(run_with_timeout "$GIT_TIMEOUT" git status -sb 2>/dev/null | grep -o 'ahead [0-9]*' || true)
+        GIT_AHEAD=$(run_with_timeout "$GIT_TIMEOUT" git -C "$PROJECT_ROOT" status -sb 2>/dev/null | grep -o 'ahead [0-9]*' || true)
         if [[ -n "$GIT_AHEAD" ]]; then
             AHEAD_COUNT=$(echo "$GIT_AHEAD" | grep -o '[0-9]*')
-            CURRENT_BRANCH=$(run_with_timeout "$GIT_TIMEOUT" git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+            CURRENT_BRANCH=$(run_with_timeout "$GIT_TIMEOUT" git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 
             FALLBACK="# Unpushed Commits
 
@@ -736,6 +813,27 @@ Please write your work summary to: {{SUMMARY_FILE}}"
             "systemMessage": $msg
         }'
     exit 0
+fi
+
+# ========================================
+# Check BitLesson Delta Section (all non-finalize rounds)
+# ========================================
+
+if [[ "$IS_FINALIZE_PHASE" != "true" ]] && [[ "$BITLESSON_REQUIRED" == "true" ]]; then
+    BITLESSON_DELTA_RESULT=$(bash "$PLUGIN_ROOT/scripts/bitlesson-validate-delta.sh" \
+        --summary-file "$SUMMARY_FILE" \
+        --bitlesson-file "$BITLESSON_FILE" \
+        --bitlesson-relpath "$BITLESSON_FILE_REL" \
+        --allow-empty-none "$BITLESSON_ALLOW_EMPTY_NONE" \
+        --template-dir "$TEMPLATE_DIR" \
+        --current-round "$CURRENT_ROUND") || {
+        echo "Error: bitlesson-validate-delta.sh failed" >&2
+        exit 1
+    }
+    if [[ -n "$BITLESSON_DELTA_RESULT" ]]; then
+        echo "$BITLESSON_DELTA_RESULT"
+        exit 0
+    fi
 fi
 
 # ========================================
@@ -843,6 +941,47 @@ if [[ "$IS_FINALIZE_PHASE" == "true" ]]; then
     mv "$STATE_FILE" "$LOOP_DIR/complete-state.md"
     echo "State preserved as: $LOOP_DIR/complete-state.md" >&2
     exit 0
+fi
+
+# ========================================
+# Context Token Guard (Feature 5)
+# ========================================
+# Guard before expensive codex review paths.
+
+TOKEN_GUARD_THRESHOLD="${HUMANIZE_RLCR_TOKEN_GUARD_TOKENS:-150000}"
+if [[ "$TOKEN_GUARD_THRESHOLD" =~ ^[0-9]+$ ]] && [[ "$TOKEN_GUARD_THRESHOLD" -gt 0 ]]; then
+    HOOK_INPUT_TOKEN_ESTIMATE=$(estimate_hook_input_tokens "$HOOK_INPUT")
+    if [[ "$HOOK_INPUT_TOKEN_ESTIMATE" -gt "$TOKEN_GUARD_THRESHOLD" ]]; then
+        RECOVERY_NOTE_FILE=$(write_context_guard_note "$HOOK_INPUT_TOKEN_ESTIMATE" "$TOKEN_GUARD_THRESHOLD")
+        FALLBACK="# Context Token Guard Triggered
+
+Estimated context size from stop-hook input: {{ESTIMATED_TOKENS}} tokens.
+Safety threshold: {{TOKEN_THRESHOLD}} tokens.
+
+The loop is blocked to avoid low-quality reviews caused by context pressure.
+
+## Next Steps
+1. Start a fresh Claude session.
+2. Resume from loop docs: {{PLAN_FILE}}, {{GOAL_TRACKER_FILE}}, {{SUMMARY_FILE}}.
+3. Recovery note: {{RECOVERY_NOTE_FILE}}"
+        REASON=$(load_and_render_safe "$TEMPLATE_DIR" "block/context-token-guard.md" "$FALLBACK" \
+            "ESTIMATED_TOKENS=$HOOK_INPUT_TOKEN_ESTIMATE" \
+            "TOKEN_THRESHOLD=$TOKEN_GUARD_THRESHOLD" \
+            "PLAN_FILE=$PLAN_FILE" \
+            "GOAL_TRACKER_FILE=$GOAL_TRACKER_FILE" \
+            "SUMMARY_FILE=$SUMMARY_FILE" \
+            "RECOVERY_NOTE_FILE=$RECOVERY_NOTE_FILE")
+
+        jq -n \
+            --arg reason "$REASON" \
+            --arg msg "Loop: Blocked - context token guard triggered" \
+            '{
+                "decision": "block",
+                "reason": $reason,
+                "systemMessage": $msg
+            }'
+        exit 0
+    fi
 fi
 
 # ========================================
@@ -1144,6 +1283,7 @@ enter_finalize_phase() {
     echo "State file renamed to: $LOOP_DIR/finalize-state.md" >&2
 
     local finalize_summary_file="$LOOP_DIR/finalize-summary.md"
+    write_loop_summary_template "$finalize_summary_file" "Finalize" "false"
     local finalize_prompt
 
     if [[ -n "$skip_reason" ]]; then
@@ -1236,6 +1376,48 @@ Follow the plan's per-task routing tags strictly:
 ROUTING_EOF
 }
 
+# Inject delegation enforcement guidance near the top of next-round prompts.
+# Arguments: $1=prompt_file_path
+inject_delegation_enforcement_note() {
+    local prompt_file="$1"
+
+    if [[ "$AGENT_TEAMS" != "true" ]]; then
+        return 0
+    fi
+
+    local enforcement_block=""
+    if [[ "$DELEGATION_ENFORCEMENT" == "strict" ]]; then
+        enforcement_block=$(cat << 'STRICT_ENFORCEMENT_EOF'
+## STRICT MODE: Delegation Enforcement
+**WARNING**: Delegate all coding to `/humanize:codex-worker`.
+If you write implementation code, edit source files, or run commands that modify the codebase directly, this breaks the loop and this round is non-compliant.
+STRICT_ENFORCEMENT_EOF
+)
+    else
+        enforcement_block="**Delegation Warning**: Delegate coding to \`/humanize:codex-worker\`; direct self-implementation can be flagged as non-compliant."
+    fi
+
+    local temp_prompt_file="${prompt_file}.tmp.$$"
+    awk -v enforcement="$enforcement_block" '
+        BEGIN { injected = 0 }
+        !injected && /^## Original Implementation Plan/ {
+            print ""
+            print enforcement
+            print ""
+            injected = 1
+        }
+        { print }
+        END {
+            if (!injected) {
+                print ""
+                print enforcement
+                print ""
+            }
+        }
+    ' "$prompt_file" > "$temp_prompt_file"
+    mv "$temp_prompt_file" "$prompt_file"
+}
+
 # Continue review loop when issues are found
 # Arguments: $1=round_number, $2=review_content
 continue_review_loop_with_issues() {
@@ -1252,6 +1434,7 @@ continue_review_loop_with_issues() {
     # Build review-fix prompt for Claude
     local next_prompt_file="$LOOP_DIR/round-${round}-prompt.md"
     local next_summary_file="$LOOP_DIR/round-${round}-summary.md"
+    write_loop_summary_template "$next_summary_file" "Review Round $round" "true"
 
     local fallback="# Code Review Findings
 
@@ -1635,20 +1818,29 @@ mv "$TEMP_FILE" "$STATE_FILE"
 # Create next round prompt
 NEXT_PROMPT_FILE="$LOOP_DIR/round-${NEXT_ROUND}-prompt.md"
 NEXT_SUMMARY_FILE="$LOOP_DIR/round-${NEXT_ROUND}-summary.md"
+write_loop_summary_template "$NEXT_SUMMARY_FILE" "Round $NEXT_ROUND" "true"
 
 # Build the next round prompt from templates
 NEXT_ROUND_FALLBACK="# Next Round Instructions
 
 Review the feedback below and address all issues.
 
+Before executing tasks in this round:
+1. Read @{{BITLESSON_FILE}}
+2. Run \`bitlesson-selector\` for each task/sub-task
+3. Follow selected lesson IDs (or \`NONE\`)
+
 ## Codex Review
 {{REVIEW_CONTENT}}
 
-Reference: {{PLAN_FILE}}, {{GOAL_TRACKER_FILE}}"
+Reference: {{PLAN_FILE}}, {{GOAL_TRACKER_FILE}}, {{BITLESSON_FILE}}"
 load_and_render_safe "$TEMPLATE_DIR" "claude/next-round-prompt.md" "$NEXT_ROUND_FALLBACK" \
     "PLAN_FILE=$PLAN_FILE" \
     "REVIEW_CONTENT=$REVIEW_CONTENT" \
-    "GOAL_TRACKER_FILE=$GOAL_TRACKER_FILE" > "$NEXT_PROMPT_FILE"
+    "GOAL_TRACKER_FILE=$GOAL_TRACKER_FILE" \
+    "BITLESSON_FILE=$BITLESSON_FILE" > "$NEXT_PROMPT_FILE"
+
+inject_delegation_enforcement_note "$NEXT_PROMPT_FILE"
 
 # Check for Open Questions in review content and inject notice if enabled
 # Detection: line containing "Open Question" substring with total length < 40 chars
@@ -1699,7 +1891,6 @@ FOOTER_FALLBACK="## Before Exiting
 Commit your changes and write summary to {{NEXT_SUMMARY_FILE}}"
 load_and_render_safe "$TEMPLATE_DIR" "claude/next-round-footer.md" "$FOOTER_FALLBACK" \
     "NEXT_SUMMARY_FILE=$NEXT_SUMMARY_FILE" >> "$NEXT_PROMPT_FILE"
-append_task_tag_routing_note "$NEXT_PROMPT_FILE"
 
 # Add push instruction only if push_every_round is true
 if [[ "$PUSH_EVERY_ROUND" == "true" ]]; then
@@ -1717,29 +1908,6 @@ if [[ -z "$GOAL_UPDATE_REQUEST" ]]; then
 fi
 echo "$GOAL_UPDATE_REQUEST" >> "$NEXT_PROMPT_FILE"
 
-# Add agent-teams continuation instructions (only during implementation phase, not review phase)
-# Loads both continuation header and shared core template for full team leader guidance
-if [[ "$AGENT_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]]; then
-    AGENT_TEAMS_CONTINUE=$(load_template "$TEMPLATE_DIR" "claude/agent-teams-continue.md" 2>/dev/null)
-    AGENT_TEAMS_CORE=$(load_template "$TEMPLATE_DIR" "claude/agent-teams-core.md" 2>/dev/null)
-    if [[ -n "$AGENT_TEAMS_CONTINUE" ]] && [[ -n "$AGENT_TEAMS_CORE" ]]; then
-        echo "" >> "$NEXT_PROMPT_FILE"
-        echo "$AGENT_TEAMS_CONTINUE" >> "$NEXT_PROMPT_FILE"
-        echo "" >> "$NEXT_PROMPT_FILE"
-        echo "$AGENT_TEAMS_CORE" >> "$NEXT_PROMPT_FILE"
-    else
-        # Fallback if templates are missing
-        cat >> "$NEXT_PROMPT_FILE" << 'AGENT_TEAMS_FALLBACK_EOF'
-
-## Agent Teams Continuation
-
-Continue using **Agent Teams mode** as the **Team Leader**.
-Split remaining work among team members and coordinate their efforts.
-Do NOT do implementation work yourself - delegate all coding to team members.
-AGENT_TEAMS_FALLBACK_EOF
-    fi
-fi
-
 # Add worktree orchestration continuation guidance when enabled
 if [[ "$WORKTREE_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]]; then
     WORKTREE_TEAMS_CONTINUE=$(load_template "$TEMPLATE_DIR" "claude/worktree-teams-continue.md" 2>/dev/null)
@@ -1754,8 +1922,28 @@ if [[ "$WORKTREE_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]]; then
                 echo "Worktree root (state, sanitized): \`$WORKTREE_ROOT_SAFE\`" >> "$NEXT_PROMPT_FILE"
             fi
         fi
+    else
+        cat >> "$NEXT_PROMPT_FILE" << 'WORKTREE_TEAMS_FALLBACK_EOF'
+
+Continue using scheduler/worker/reviewer worktree orchestration.
+Each task must be explicitly marked parallelizable (`yes` or `no`) before assignment.
+WORKTREE_TEAMS_FALLBACK_EOF
     fi
 fi
+
+if [[ "$WORKTREE_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]] && [[ "$CURRENT_ROUND" =~ ^[0-9]+$ ]] && [[ "$CURRENT_ROUND" -ge 1 ]]; then
+    WORKER_MARKER_FILE="$LOOP_DIR/.worker-invoked-round-${CURRENT_ROUND}"
+    if [[ ! -f "$WORKER_MARKER_FILE" ]]; then
+        cat >> "$NEXT_PROMPT_FILE" << EOF
+
+> WARNING: No codex-worker invocation was detected in round ${CURRENT_ROUND}. If coding tasks were assigned,
+> they must be delegated to /humanize:codex-worker. Direct self-implementation violates the
+> team-leader protocol.
+EOF
+    fi
+fi
+
+append_task_tag_routing_note "$NEXT_PROMPT_FILE"
 
 # Build system message
 SYSTEM_MSG="Loop: Round $NEXT_ROUND/$MAX_ITERATIONS - Codex found issues to address"

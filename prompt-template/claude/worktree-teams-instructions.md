@@ -14,7 +14,7 @@ Roles (recorded in `worktree-assignment.md`):
 2. Assign each parallelizable lane to a dedicated worker and reviewer pair and record ownership in `worktree-assignment.md`.
 3. Use isolated `git worktree` directories per lane to avoid silent overwrite conflicts.
 4. Never assign two active workers to the same file in parallel. If overlap is required, enforce order via `blockedBy`.
-5. For every worker task, require running `bitlesson-selector` before coding and record selected lesson IDs (or `NONE`) in the lane notes.
+5. For every worker task, require running `bitlesson-selector` before coding (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec -m gpt-5.2 -c model_reasoning_effort=high`) or the `bitlesson-selector` agent) and record selected lesson IDs (or `NONE`) in the lane notes.
 6. When invoking `/humanize:codex-worker` for a lane, pass `--workdir <worktree path>` and keep the default `gpt-5.3-codex:xhigh` unless there is a concrete reason to override.
 7. In every worker/reviewer prompt, add explicit cross-vendor context (even if all models are OpenAI today):
    - worker: "your output will be reviewed independently (cross-vendor style)"
@@ -35,3 +35,12 @@ Before running worker tasks, create worktree lanes:
 
 The script writes lane mappings to `worktree-assignment.md` in the active RLCR loop directory.
 Use that mapping directly when assigning worker/reviewer tasks.
+
+### Optional: Use Claude Code `/batch` to Kick Off Lanes
+
+If your Claude Code supports `/batch`, you can use it to start lane work in parallel (Humanize still uses `worktree-assignment.md` as the source of truth).
+
+Suggested flow:
+1. Run `/humanize:gen-batch-prompt` to generate a ready-to-paste dispatch prompt from `worktree-assignment.md`
+2. Run Claude Code `/batch` and paste the generated prompt
+3. Ensure every agent stays within its lane’s `Worktree Path` + `File Ownership` boundaries

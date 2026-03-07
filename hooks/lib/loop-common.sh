@@ -38,18 +38,34 @@ readonly FIELD_FULL_REVIEW_ROUND="full_review_round"
 readonly FIELD_ASK_CODEX_QUESTION="ask_codex_question"
 readonly FIELD_SESSION_ID="session_id"
 readonly FIELD_AGENT_TEAMS="agent_teams"
+readonly FIELD_WORKTREE_TEAMS="worktree_teams"
+readonly FIELD_WORKTREE_ROOT="worktree_root"
+readonly FIELD_DELEGATION_ENFORCEMENT="delegation_enforcement"
 
 # Default Codex configuration (single source of truth - all scripts reference this)
-# Both use :- so scripts can override before sourcing when needed.
+# Both use :- so scripts can override before sourcing (e.g. PR loop sets different model/effort).
 #
-# Role split:
-# - Analyzer/Reviewer: gpt-5.2 (non-codex)
-# - Worker (implementation): gpt-5.3-codex
+# Role split (hybrid: role-based defaults + runtime-aware worker model):
+# - Analyzer/Reviewer (DEFAULT_CODEX_MODEL): gpt-5.2 in all modes (always available)
+# - Worker/Implementer (DEFAULT_CODEX_WORKER_MODEL): runtime-aware
+#     Claude Code plugin mode -> gpt-5.3-codex (available in plugin sandbox)
+#     Skill mode (Codex/Kimi) -> gpt-5.2 (gpt-5.3-codex unavailable outside plugin)
+#
+# Detection: check BASH_SOURCE path for .claude/plugins/cache/ (CLAUDE_PLUGIN_ROOT is a
+# config-time template variable, not a runtime env var, so we cannot check it directly).
 DEFAULT_CODEX_MODEL="${DEFAULT_CODEX_MODEL:-gpt-5.2}"
 DEFAULT_CODEX_EFFORT="${DEFAULT_CODEX_EFFORT:-xhigh}"
 
 # Default worker configuration (used by /humanize:codex-worker).
-DEFAULT_CODEX_WORKER_MODEL="${DEFAULT_CODEX_WORKER_MODEL:-gpt-5.3-codex}"
+if [[ -z "${DEFAULT_CODEX_WORKER_MODEL:-}" ]]; then
+    _LOOP_COMMON_SELF="${BASH_SOURCE[0]:-$0}"
+    if [[ "$_LOOP_COMMON_SELF" == */.claude/plugins/cache/* ]]; then
+        DEFAULT_CODEX_WORKER_MODEL="gpt-5.3-codex"
+    else
+        DEFAULT_CODEX_WORKER_MODEL="gpt-5.2"
+    fi
+    unset _LOOP_COMMON_SELF
+fi
 DEFAULT_CODEX_WORKER_EFFORT="${DEFAULT_CODEX_WORKER_EFFORT:-xhigh}"
 
 # Codex review markers
@@ -336,6 +352,9 @@ _parse_state_fields() {
     STATE_ASK_CODEX_QUESTION=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_ASK_CODEX_QUESTION}:" | sed "s/${FIELD_ASK_CODEX_QUESTION}: *//" | tr -d ' ' || true)
     STATE_SESSION_ID=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_SESSION_ID}:" | sed "s/${FIELD_SESSION_ID}: *//" || true)
     STATE_AGENT_TEAMS=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_AGENT_TEAMS}:" | sed "s/${FIELD_AGENT_TEAMS}: *//" | tr -d ' ' || true)
+    STATE_WORKTREE_TEAMS=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_WORKTREE_TEAMS}:" | sed "s/${FIELD_WORKTREE_TEAMS}: *//" | tr -d ' ' || true)
+    STATE_WORKTREE_ROOT=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_WORKTREE_ROOT}:" | sed "s/${FIELD_WORKTREE_ROOT}: *//" | sed 's/^"//; s/"$//' || true)
+    STATE_DELEGATION_ENFORCEMENT=$(echo "$STATE_FRONTMATTER" | grep "^${FIELD_DELEGATION_ENFORCEMENT}:" | sed "s/${FIELD_DELEGATION_ENFORCEMENT}: *//" | tr -d ' ' || true)
 }
 
 # Parse state file frontmatter and set variables (tolerant mode with defaults)
@@ -355,6 +374,10 @@ _parse_state_fields() {
 #   STATE_REVIEW_STARTED - "true" or "false"
 #   STATE_FULL_REVIEW_ROUND - interval for Full Alignment Check (default: 5)
 #   STATE_ASK_CODEX_QUESTION - "true" or "false" (v1.6.5+)
+#   STATE_AGENT_TEAMS - "true" or "false"
+#   STATE_WORKTREE_TEAMS - "true" or "false"
+#   STATE_WORKTREE_ROOT - worktree root path when worktree teams are enabled
+#   STATE_DELEGATION_ENFORCEMENT - "warn" or "strict"
 # Returns: 0 on success, 1 if file not found
 # Note: For strict validation, use parse_state_file_strict() instead
 parse_state_file() {
@@ -377,6 +400,9 @@ parse_state_file() {
     STATE_FULL_REVIEW_ROUND="${STATE_FULL_REVIEW_ROUND:-5}"
     STATE_ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-true}"
     STATE_AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
+    STATE_WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
+    STATE_WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
+    STATE_DELEGATION_ENFORCEMENT="${STATE_DELEGATION_ENFORCEMENT:-warn}"
     # STATE_REVIEW_STARTED left as-is (empty if missing, to allow schema validation)
 
     return 0
@@ -452,6 +478,9 @@ parse_state_file_strict() {
     STATE_FULL_REVIEW_ROUND="${STATE_FULL_REVIEW_ROUND:-5}"
     STATE_ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-true}"
     STATE_AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
+    STATE_WORKTREE_TEAMS="${STATE_WORKTREE_TEAMS:-false}"
+    STATE_WORKTREE_ROOT="${STATE_WORKTREE_ROOT:-}"
+    STATE_DELEGATION_ENFORCEMENT="${STATE_DELEGATION_ENFORCEMENT:-warn}"
 
     return 0
 }
