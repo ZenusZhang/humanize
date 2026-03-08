@@ -26,6 +26,10 @@ Note: Analyzer text labeled F9 as "6 commits remaining", but only 4 F9 SHAs were
 
 ## F1: feat-rlcr-loop-improvements (7)
 
+Note: F1 did **not** ship the worktree-team/worktree-lane feature. Worktree orchestration
+belongs to later work (F6), and the `WORKTREE_ROOT_SAFE` mention in commit `07d67bf` should
+not be read as evidence that worktree support landed with F1.
+
 | Order | SHA | Subject |
 |---:|---|---|
 | 1 | 61e45a1 | feat: add continue-rlcr-loop command |

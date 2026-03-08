@@ -160,6 +160,7 @@ Recommended PR order:
 
 1. `F2` (`feat-gen-plan-convergence`)
 2. `F1` (`feat-rlcr-loop-improvements`)
+   - Note: F1 does **not** include worktree-team/worktree-lane delivery; keep worktree functionality in F6.
 3. `F3` (`feat-task-graph`)
 4. `F9` (`feat-misc`)
 5. `F4` (`feat-gen-batch-prompt`, after F3)
