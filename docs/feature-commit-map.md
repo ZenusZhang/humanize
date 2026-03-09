@@ -42,6 +42,10 @@ not be read as evidence that worktree support landed with F1.
 
 ## F2: feat-gen-plan-convergence (9)
 
+Note: The Context Token Guard feature did **not** ship with F2. It was introduced later in
+local `main`/`zenus/main` worktree-flow commits (see `ee70f4d` under F6), so it was not merged
+into upstream `origin/main` together with the F2 gen-plan-convergence series.
+
 | Order | SHA | Subject |
 |---:|---|---|
 | 1 | c283a92 | feat: add claude-codex debate flow to gen-plan |
