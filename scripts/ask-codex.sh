@@ -55,7 +55,7 @@ USAGE:
 
 OPTIONS:
   --codex-model <MODEL:EFFORT>
-                       Codex model and reasoning effort (default: gpt-5.2:xhigh)
+                       Codex model and reasoning effort (default: gpt-5.4:xhigh)
   --codex-timeout <SECONDS>
                        Timeout for the Codex query in seconds (default: 3600)
   -h, --help           Show this help message
@@ -68,7 +68,7 @@ DESCRIPTION:
 
 EXAMPLES:
   /humanize:ask-codex How should I structure the authentication module?
-  /humanize:ask-codex --codex-model gpt-5.2:high What are the performance bottlenecks?
+  /humanize:ask-codex --codex-model gpt-5.4:xhigh What are the performance bottlenecks?
   /humanize:ask-codex --codex-timeout 300 Review the error handling in src/api/
 
 ENVIRONMENT:
@@ -226,8 +226,8 @@ fi
 CROSS_AGENT_CONTEXT=$(cat << 'CONTEXT_EOF'
 ## Cross-Agent Review Context
 
-- You are the **analyzer** running via **Codex CLI** (default: `gpt-5.2`, non-codex).
-- The implementation worker is typically **Codex CLI** (default: `gpt-5.3-codex`) unless the prompt says otherwise.
+- You are the **analyzer** running via **Codex CLI** (default: `gpt-5.4`, non-codex).
+- The implementation worker is typically **Codex CLI** (default: `gpt-5.4`) unless the prompt says otherwise.
 - Treat this as **independent (cross-vendor style) review** even if both models are OpenAI today.
 - Your output will be consumed by the coordinator/worker in the next step.
 CONTEXT_EOF

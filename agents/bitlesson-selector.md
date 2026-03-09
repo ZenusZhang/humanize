@@ -19,7 +19,7 @@ You will receive:
 ## Cross-Agent Review Context
 
 - This agent markdown serves as the prompt specification for BitLesson selection.
-- Runtime execution happens via `scripts/bitlesson-select.sh`, which calls Codex CLI as `codex exec -m gpt-5.2 -c model_reasoning_effort=high`.
+- Runtime execution happens via `scripts/bitlesson-select.sh`, which calls Codex CLI as `codex exec -m gpt-5.4 -c model_reasoning_effort=xhigh`.
 - Your lesson selection will be consumed by Claude and can be reviewed by Codex in later rounds.
 - Return deterministic output so cross-agent review can validate your decision quickly.
 

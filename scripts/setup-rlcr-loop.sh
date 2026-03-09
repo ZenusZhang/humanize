@@ -1297,8 +1297,8 @@ For every sub-agent invocation in this round (Task agents, \`bitlesson-selector\
 
 Each task must have one routing tag from the plan: \`coding\` or \`analyze\`.
 
-- Tag \`coding\`: execute via \`/humanize:codex-worker\` (default: \`gpt-5.3-codex:xhigh\`).
-- Tag \`analyze\`: execute via \`/humanize:ask-codex\` (default: \`gpt-5.2:xhigh\`), then integrate the result.
+- Tag \`coding\`: execute via \`/humanize:codex-worker\` (default: \`gpt-5.4:xhigh\`).
+- Tag \`analyze\`: execute via \`/humanize:ask-codex\` (default: \`gpt-5.4:xhigh\`), then integrate the result.
 - Keep Goal Tracker "Active Tasks" columns **Tag** and **Owner** aligned with execution (\`coding -> worker\`, \`analyze -> analyzer\`).
 - If a task is missing a valid tag, do not guess silently; document it in Plan Evolution Log and block completion until clarified.
 

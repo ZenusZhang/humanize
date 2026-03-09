@@ -14,7 +14,7 @@ You are strictly prohibited from only addressing the most important issues - you
 
 ## Sub-Agent Cross-Review Protocol (MANDATORY)
 
-For every sub-agent invocation in this round (Task agents, `bitlesson-selector` via `scripts/bitlesson-select.sh` (preferred; `codex exec -m gpt-5.2 -c model_reasoning_effort=high`) or the `bitlesson-selector` agent, code simplifier, etc.), include explicit cross-vendor review context in the prompt (even if all models are OpenAI today):
+For every sub-agent invocation in this round (Task agents, `bitlesson-selector` via `scripts/bitlesson-select.sh` (preferred; `codex exec -m gpt-5.4 -c model_reasoning_effort=xhigh`) or the `bitlesson-selector` agent, code simplifier, etc.), include explicit cross-vendor review context in the prompt (even if all models are OpenAI today):
 - Either: "Your output will be reviewed independently (cross-vendor style)."
 - Or: "You are reviewing findings/results produced by an independent worker (cross-vendor style)."
 
@@ -29,7 +29,7 @@ Below is Codex's review result:
 
 Before executing any task or sub-task in this round:
 - Read @{{BITLESSON_FILE}}
-- Run `bitlesson-selector` with sub-task + related paths + `bitlesson.md` (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec -m gpt-5.2 -c model_reasoning_effort=high`) or the `bitlesson-selector` agent)
+- Run `bitlesson-selector` with sub-task + related paths + `bitlesson.md` (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec -m gpt-5.4 -c model_reasoning_effort=xhigh`) or the `bitlesson-selector` agent)
 - Apply selected lesson IDs (or `NONE`) during implementation
 - If a problem is solved only after multiple rounds, add/update the lesson entry in `bitlesson.md`
 

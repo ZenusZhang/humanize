@@ -55,7 +55,7 @@ USAGE:
 
 OPTIONS:
   --worker-model <MODEL:EFFORT>
-                       Worker model and reasoning effort (default: gpt-5.3-codex:xhigh)
+                       Worker model and reasoning effort (default: gpt-5.4:xhigh)
   --worker-timeout <SECONDS>
                        Timeout for the worker run in seconds (default: 5400)
   --workdir <PATH>     Directory to run in (defaults to current working directory)

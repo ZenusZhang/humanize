@@ -26,7 +26,7 @@ set -euo pipefail
 # ========================================
 
 # Override defaults before sourcing loop-common.sh when PR loop needs custom values
-DEFAULT_CODEX_MODEL="gpt-5.2"
+DEFAULT_CODEX_MODEL="gpt-5.4"
 DEFAULT_CODEX_EFFORT="xhigh"
 DEFAULT_CODEX_TIMEOUT=900
 DEFAULT_POLL_INTERVAL=30

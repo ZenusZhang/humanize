@@ -146,7 +146,7 @@ EOF
 
 SELECTOR_TIMEOUT=120
 
-CODEX_EXEC_ARGS=("-m" "gpt-5.2" "-c" "model_reasoning_effort=high")
+CODEX_EXEC_ARGS=("-m" "gpt-5.4" "-c" "model_reasoning_effort=xhigh")
 
 # Determine automation flag based on environment variable (same as ask-codex.sh)
 CODEX_AUTO_FLAG="--full-auto"

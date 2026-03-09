@@ -117,11 +117,11 @@ FULL_REVIEW_ROUND="${STATE_FULL_REVIEW_ROUND:-5}"
 REVIEW_STARTED="$STATE_REVIEW_STARTED"
 # RLCR mode split:
 # - codex exec uses state codex_model/codex_effort (from loop-common.sh defaults)
-# - codex review uses same model, with fixed effort "high"
+# - codex review uses the same model and effort for consistency
 CODEX_EXEC_MODEL="${STATE_CODEX_MODEL:-$DEFAULT_CODEX_MODEL}"
 CODEX_EXEC_EFFORT="${STATE_CODEX_EFFORT:-$DEFAULT_CODEX_EFFORT}"
 CODEX_REVIEW_MODEL="${STATE_CODEX_MODEL:-$DEFAULT_CODEX_MODEL}"
-CODEX_REVIEW_EFFORT="high"
+CODEX_REVIEW_EFFORT="${STATE_CODEX_EFFORT:-$DEFAULT_CODEX_EFFORT}"
 CODEX_TIMEOUT="${STATE_CODEX_TIMEOUT:-${CODEX_TIMEOUT:-$DEFAULT_CODEX_TIMEOUT}}"
 ASK_CODEX_QUESTION="${STATE_ASK_CODEX_QUESTION:-false}"
 AGENT_TEAMS="${STATE_AGENT_TEAMS:-false}"
@@ -1370,8 +1370,8 @@ append_task_tag_routing_note() {
 ## Task Tag Routing Reminder
 
 Follow the plan's per-task routing tags strictly:
-- `coding` task -> execute via `/humanize:codex-worker` (default: `gpt-5.3-codex:xhigh`)
-- `analyze` task -> execute via `/humanize:ask-codex` (default: `gpt-5.2:xhigh`), then integrate the result
+- `coding` task -> execute via `/humanize:codex-worker` (default: `gpt-5.4:xhigh`)
+- `analyze` task -> execute via `/humanize:ask-codex` (default: `gpt-5.4:xhigh`), then integrate the result
 - Keep Goal Tracker Active Tasks columns `Tag` and `Owner` aligned with execution
 ROUTING_EOF
 }
