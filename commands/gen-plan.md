@@ -1,7 +1,6 @@
 ---
 description: "Generate implementation plan from draft document"
-model: opus
-argument-hint: "--input <path/to/draft.md> --output <path/to/plan.md> [--auto-start-rlcr-if-converged]"
+argument-hint: "--input <path/to/draft.md> --output <path/to/plan.md> [--auto-start-rlcr-if-converged] [--discussion|--direct]"
 allowed-tools:
   - "Bash(${CLAUDE_PLUGIN_ROOT}/scripts/validate-gen-plan-io.sh:*)"
   - "Bash(${CLAUDE_PLUGIN_ROOT}/scripts/ask-codex.sh:*)"
@@ -19,28 +18,32 @@ hide-from-slash-command-tool: "true"
 
 Read and execute below with ultrathink.
 
+## Hard Constraint: No Coding During Plan Generation
+
+This command MUST ONLY generate a plan document during the planning phases. It MUST NOT implement tasks, modify repository source code, or make commits/PRs while producing the plan.
+
+Permitted writes (before any optional auto-start) are limited to:
+- The plan output file (`--output`)
+- Optional translated language variant (only when `ALT_PLAN_LANGUAGE` is configured)
+
+If `--auto-start-rlcr-if-converged` is enabled, the command MAY immediately start the RLCR loop by running `/humanize:start-rlcr-loop <output-plan-path>`, but only in `discussion` mode when `PLAN_CONVERGENCE_STATUS=converged` and there are no pending user decisions. All coding happens in that subsequent command/loop, not during plan generation.
+
 This command transforms a user's draft document into a well-structured implementation plan with clear goals, acceptance criteria (AC-X format), path boundaries, and feasibility suggestions.
 
 ## Workflow Overview
 
+> **Sequential Execution Constraint**: All phases below MUST execute strictly in order. Do NOT parallelize tool calls across different phases. Each phase must fully complete before the next one begins.
+
 1. **Execution Mode Setup**: Parse optional behaviors from command arguments
-2. **Load Project Config**: Read `.humanize/config.json` and extract `chinese_plan` flag
+2. **Load Project Config**: Resolve merged Humanize config defaults for `alternative_plan_language` and `gen_plan_mode`
 3. **IO Validation**: Validate input and output paths
 4. **Relevance Check**: Verify draft is relevant to the repository
 5. **Codex First-Pass Analysis**: Use one planning Codex before Claude synthesizes plan details
 6. **Claude Candidate Plan (v1)**: Claude builds an initial plan from draft + Codex findings
 7. **Iterative Convergence Loop**: Claude and a second Codex iteratively challenge/refine plan reasonability
-8. **Issue and Disagreement Resolution**: Resolve unresolved opposite opinions (or skip manual review if converged and auto-start mode is enabled)
-9. **Final Plan Generation**: Generate the converged structured plan.md with task routing tags and Codex handoff sections
-10. **Write and Complete**: Write output file, optionally write `_zh` Chinese-only variant, optionally auto-start work, and report results
-
-## Cross-Agent Sub-Agent Protocol (MANDATORY)
-
-For **every** sub-agent invocation (Task sub-agents and `ask-codex` calls), include explicit cross-agent context in the prompt:
-
-- If the callee is Claude-family (Task agent): state that its output will be reviewed by **Codex**.
-- If the callee is Codex (`ask-codex`): state that Codex is reviewing/analyzing material prepared by **Claude** (or user draft) and its output will be reviewed by Claude.
-- If the callee is reviewing another model's output, explicitly name both sides (`Claude` vs `Codex`) in one short context block.
+8. **Issue and Disagreement Resolution**: Resolve unresolved opposite opinions (or skip manual review if converged, auto-start mode is enabled, and `GEN_PLAN_MODE=discussion`)
+9. **Final Plan Generation**: Generate the converged structured plan.md with task routing tags
+10. **Write and Complete**: Write output file, optionally write translated language variant, optionally auto-start implementation, and report results
 
 ---
 
@@ -49,23 +52,81 @@ For **every** sub-agent invocation (Task sub-agents and `ask-codex` calls), incl
 Parse `$ARGUMENTS` and set:
 - `AUTO_START_RLCR_IF_CONVERGED=true` if `--auto-start-rlcr-if-converged` is present
 - `AUTO_START_RLCR_IF_CONVERGED=false` otherwise
+- `GEN_PLAN_MODE_DISCUSSION=true` if `--discussion` is present
+- `GEN_PLAN_MODE_DIRECT=true` if `--direct` is present
+- If both `--discussion` and `--direct` are present simultaneously, report error "Cannot use --discussion and --direct together" and stop
 
-This option allows skipping manual plan review and starting implementation immediately, but only when plan convergence is achieved and no pending user decisions remain.
+`AUTO_START_RLCR_IF_CONVERGED=true` allows skipping manual plan review and starting implementation immediately (by invoking `/humanize:start-rlcr-loop <output-plan-path>`), but only when `GEN_PLAN_MODE=discussion`, plan convergence is achieved, and no pending user decisions remain. In `direct` mode this condition is never satisfied.
 
 ---
 
 ## Phase 0.5: Load Project Config
 
-After setting execution mode flags, load the project-level configuration:
+After setting execution mode flags, resolve configuration using `${CLAUDE_PLUGIN_ROOT}/scripts/lib/config-loader.sh`. Reuse that behavior; do not read `.humanize/config.json` directly.
 
-1. Attempt to read `.humanize/config.json` from the project root (the repository root where the command was invoked).
-2. If the file does not exist, treat all config fields as absent. This is NOT an error; continue normally.
-3. If the file exists, parse it as JSON and extract the `chinese_plan` field:
-   - If `chinese_plan` is `true` (boolean), set `CHINESE_PLAN_ENABLED=true`.
-   - Otherwise (field absent, `false`, or any non-true value), set `CHINESE_PLAN_ENABLED=false`.
-4. A malformed JSON file should be reported as a warning but must NOT stop execution; fall back to `CHINESE_PLAN_ENABLED=false`.
+### Config Merge Semantics
 
-`CHINESE_PLAN_ENABLED` controls whether a `_zh` Chinese-only variant of the output file is written in Phase 8.
+1. Source `${CLAUDE_PLUGIN_ROOT}/scripts/lib/config-loader.sh`.
+2. Call `load_merged_config "${CLAUDE_PLUGIN_ROOT}" "${PROJECT_ROOT}"` to obtain `MERGED_CONFIG_JSON`, where `PROJECT_ROOT` is the repository root where the command was invoked.
+3. `load_merged_config` merges these layers in order:
+   - Required default config: `${CLAUDE_PLUGIN_ROOT}/config/default_config.json`
+   - Optional user config: `${XDG_CONFIG_HOME:-$HOME/.config}/humanize/config.json`
+   - Optional project config: `${HUMANIZE_CONFIG:-$PROJECT_ROOT/.humanize/config.json}`
+4. Later layers override earlier layers. Malformed optional JSON objects are warnings and ignored. A malformed required default config, missing `jq`, or any other fatal `load_merged_config` failure is a configuration error and must stop the command.
+
+### Values to Extract
+
+Use `get_config_value` against `MERGED_CONFIG_JSON` to read:
+
+- `CONFIG_ALT_LANGUAGE_RAW` from `alternative_plan_language`
+- `CONFIG_GEN_PLAN_MODE_RAW` from `gen_plan_mode`
+- `CONFIG_CHINESE_PLAN_RAW` from `chinese_plan` (legacy fallback only)
+
+Also detect whether `alternative_plan_language` is explicitly present in `MERGED_CONFIG_JSON` so an empty string still counts as an explicit override:
+
+- `HAS_ALT_LANGUAGE_KEY=true` when `MERGED_CONFIG_JSON` contains the `alternative_plan_language` key
+- `HAS_ALT_LANGUAGE_KEY=false` otherwise
+
+### Alternative Language Resolution
+
+1. Resolve the effective `alternative_plan_language` value with this priority:
+   - Merged config `alternative_plan_language`, when `HAS_ALT_LANGUAGE_KEY=true` (even if the value is an empty string)
+   - Deprecated merged config `chinese_plan`, only when `HAS_ALT_LANGUAGE_KEY=false`
+   - Default disabled state
+2. Backward compatibility for deprecated `chinese_plan`:
+   - If `HAS_ALT_LANGUAGE_KEY=true` and `CONFIG_CHINESE_PLAN_RAW` is `true`, log: `Warning: deprecated "chinese_plan" field ignored; "alternative_plan_language" takes precedence. Remove "chinese_plan" from your humanize config.`
+   - If `HAS_ALT_LANGUAGE_KEY=false` and `CONFIG_CHINESE_PLAN_RAW` is `true`, treat the effective `alternative_plan_language` as `"Chinese"`. Log: `Warning: deprecated "chinese_plan" field detected. Replace it with "alternative_plan_language": "Chinese" in your humanize config.`
+   - Otherwise treat the effective `alternative_plan_language` as disabled.
+3. Resolve `ALT_PLAN_LANGUAGE` and `ALT_PLAN_LANG_CODE` from the effective `alternative_plan_language` value using the built-in mapping table below. Matching is **case-insensitive**.
+
+   | Language   | Code | Suffix |
+   |------------|------|--------|
+   | Chinese    | zh   | `_zh`  |
+   | Korean     | ko   | `_ko`  |
+   | Japanese   | ja   | `_ja`  |
+   | Spanish    | es   | `_es`  |
+   | French     | fr   | `_fr`  |
+   | German     | de   | `_de`  |
+   | Portuguese | pt   | `_pt`  |
+   | Russian    | ru   | `_ru`  |
+   | Arabic     | ar   | `_ar`  |
+
+   Matching accepts both the language name (e.g. `"Chinese"`) and the ISO 639-1 code (e.g. `"zh"`), both case-insensitive. Leading/trailing whitespace is trimmed before matching.
+
+   - If the value is empty or absent: set `ALT_PLAN_LANGUAGE=""` and `ALT_PLAN_LANG_CODE=""` (disabled).
+   - If the value is `"English"` or `"en"` (case-insensitive): set `ALT_PLAN_LANGUAGE=""` and `ALT_PLAN_LANG_CODE=""` (no-op; the plan is already in English).
+   - If the value matches a language name or code in the table: set `ALT_PLAN_LANGUAGE` to the matched language name and `ALT_PLAN_LANG_CODE` to the corresponding code.
+   - If the value does NOT match any language name or code in the table: set `ALT_PLAN_LANGUAGE=""` and `ALT_PLAN_LANG_CODE=""` (disabled). Log: `Warning: unsupported alternative_plan_language "<value>". Supported values: Chinese (zh), Korean (ko), Japanese (ja), Spanish (es), French (fr), German (de), Portuguese (pt), Russian (ru), Arabic (ar). Translation variant will not be generated.`
+4. Resolve `CONFIG_GEN_PLAN_MODE_RAW` from the merged config:
+   - Valid values: `"discussion"` or `"direct"` (case-insensitive).
+   - Invalid or absent values: treat as absent (fall back to default) and log a warning if the value is present but invalid.
+5. Resolve `GEN_PLAN_MODE` using the following priority (highest to lowest), with CLI flags taking priority over merged config:
+   - CLI flag: if `GEN_PLAN_MODE_DISCUSSION=true`, set `GEN_PLAN_MODE=discussion`; if `GEN_PLAN_MODE_DIRECT=true`, set `GEN_PLAN_MODE=direct`
+   - Merged config `gen_plan_mode` field (if valid)
+   - Default: `discussion`
+6. Malformed optional user or project config files should be reported as warnings by `load_merged_config` and must NOT stop execution. In those cases, continue with the remaining valid layers and the same effective defaults (`ALT_PLAN_LANGUAGE=""`, `ALT_PLAN_LANG_CODE=""`, and `GEN_PLAN_MODE=discussion`) when no higher-precedence value is available.
+
+`ALT_PLAN_LANGUAGE` and `ALT_PLAN_LANG_CODE` control whether a translated language variant of the output file is written in Phase 8. When `ALT_PLAN_LANGUAGE` is non-empty, a variant file with the `_<ALT_PLAN_LANG_CODE>` suffix is generated.
 
 ---
 
@@ -78,7 +139,7 @@ Execute the validation script with the provided arguments:
 ```
 
 **Handle exit codes:**
-- Exit code 0: Continue to Phase 2
+- Exit code 0: Continue to Phase 2. Parse the `TEMPLATE_FILE:` line from stdout to get the template path.
 - Exit code 1: Report "Input file not found" and stop
 - Exit code 2: Report "Input file is empty" and stop
 - Exit code 3: Report "Output directory does not exist - please create it" and stop
@@ -86,6 +147,8 @@ Execute the validation script with the provided arguments:
 - Exit code 5: Report "No write permission to output directory" and stop
 - Exit code 6: Report "Invalid arguments" and show usage, then stop
 - Exit code 7: Report "Plan template file not found - plugin configuration error" and stop
+
+**Note:** The validation script is side-effect-free. It does NOT create the output file.
 
 ---
 
@@ -112,7 +175,11 @@ After IO validation passes, check if the draft is relevant to this repository.
    - Show the reason from the relevance check
    - Stop the command
 
-4. **If RELEVANT**: Continue to Phase 3
+4. **If RELEVANT**: Create the output plan file by copying the template and appending the draft:
+   ```bash
+   cp "$TEMPLATE_FILE" "$OUTPUT_FILE" && echo "" >> "$OUTPUT_FILE" && echo "--- Original Design Draft Start ---" >> "$OUTPUT_FILE" && echo "" >> "$OUTPUT_FILE" && cat "$INPUT_FILE" >> "$OUTPUT_FILE" && echo "" >> "$OUTPUT_FILE" && echo "--- Original Design Draft End ---" >> "$OUTPUT_FILE"
+   ```
+   Then continue to Phase 3.
 
 ---
 
@@ -120,17 +187,13 @@ After IO validation passes, check if the draft is relevant to this repository.
 
 After relevance check, invoke Codex BEFORE Claude plan synthesis.
 
-This Codex pass is the **planning Codex batch (Batch 1)** in the multi-Codex workflow.
+This Codex pass is the first planning analysis before Claude synthesizes plan details.
 
 1. Run:
    ```bash
    "${CLAUDE_PLUGIN_ROOT}/scripts/ask-codex.sh" "<structured prompt>"
    ```
 2. The structured prompt MUST include:
-   - Cross-agent context block:
-     - "You are Codex; Claude is the counterpart agent."
-     - "You are analyzing draft + repo context for Claude's downstream planning."
-     - "Your output will be reviewed and integrated by Claude."
    - Repository context (project purpose, relevant files)
    - Raw draft content
    - Explicit request to critique assumptions, identify missing requirements, and propose stronger plan directions
@@ -142,7 +205,7 @@ This Codex pass is the **planning Codex batch (Batch 1)** in the multi-Codex wor
    - `QUESTIONS_FOR_USER:` questions that need explicit human decisions
    - `CANDIDATE_CRITERIA:` candidate acceptance criteria suggestions
 4. Preserve this output as **Codex Analysis v1** and feed it into Claude planning.
-5. Record a concise **Batch 1 Planning Summary** that can later be handed to implementation Codex agents.
+5. Record a concise planning summary from this analysis.
 
 ### Codex Availability Handling
 
@@ -158,7 +221,7 @@ Use draft content + Codex Analysis v1 to produce an initial candidate plan and i
 
 Deeply analyze the draft for potential issues. Use Explore agents to investigate the codebase.
 
-Alongside candidate plan v1, prepare an **Implementation Handoff Draft** for later Batch 2 Codex implementers. It should summarize scope, boundaries, dependencies, and known risks in concise execution language.
+Alongside candidate plan v1, prepare a concise implementation summary covering scope, boundaries, dependencies, and known risks.
 
 ### Analysis Dimensions
 
@@ -194,6 +257,8 @@ Use the Task tool with `subagent_type: "Explore"` to investigate:
 
 ## Phase 5: Iterative Convergence Loop (Claude <-> Second Codex)
 
+If `GEN_PLAN_MODE=direct`, skip this entire phase. The plan proceeds directly from candidate plan v1 (Phase 4) to Phase 6 without convergence rounds. Since no convergence rounds or second-pass review occurred, set `PLAN_CONVERGENCE_STATUS=partially_converged` and `HUMAN_REVIEW_REQUIRED=true` (direct mode must NOT satisfy `--auto-start-rlcr-if-converged` conditions).
+
 After Claude candidate plan v1 is ready, run iterative challenge/refine rounds with a SECOND Codex pass.
 
 ### Convergence Round Steps
@@ -204,9 +269,6 @@ After Claude candidate plan v1 is ready, run iterative challenge/refine rounds w
      "${CLAUDE_PLUGIN_ROOT}/scripts/ask-codex.sh" "<review current candidate plan>"
      ```
    - Prompt MUST include current candidate plan, prior disagreements, and unresolved items
-   - Prompt MUST include cross-agent context:
-     - "You are Codex reviewing a Claude-produced candidate plan."
-     - "Your response will be reviewed by Claude and used for plan revision."
    - Require output format:
      - `AGREE:` points accepted as reasonable
      - `DISAGREE:` points considered unreasonable and why
@@ -246,10 +308,27 @@ Set convergence state explicitly:
 ### Step 1: Manual Review Gate
 
 Decide if manual review can be skipped:
-- If `AUTO_START_RLCR_IF_CONVERGED=true` **and** `PLAN_CONVERGENCE_STATUS=converged`, set `HUMAN_REVIEW_REQUIRED=false`
+- If `GEN_PLAN_MODE=direct`, set `HUMAN_REVIEW_REQUIRED=true`
+- Else if `AUTO_START_RLCR_IF_CONVERGED=true` **and** `PLAN_CONVERGENCE_STATUS=converged`, set `HUMAN_REVIEW_REQUIRED=false`
 - Otherwise set `HUMAN_REVIEW_REQUIRED=true`
 
 If `HUMAN_REVIEW_REQUIRED=false`, skip Step 2-4 and continue directly to Phase 7.
+
+### Step 1.5: Consolidate Pending User Decisions (runs unconditionally)
+
+Before proceeding (regardless of `HUMAN_REVIEW_REQUIRED`), consolidate all user-facing questions from prior phases into the plan's `## Pending User Decisions` section:
+
+1. Extract `QUESTIONS_FOR_USER` items from Codex Analysis v1 (Phase 3)
+2. Extract items with status `needs_user_decision` from the final convergence matrix (Phase 5) — use the last round's state, not intermediate rounds
+3. Deduplicate: if the same topic appears in both sources, merge into one entry
+4. For each collected item, check if it was substantively resolved during Phase 4-5 plan refinement (i.e., Claude addressed it and second Codex agreed in a subsequent round). Remove only items with clear evidence of resolution.
+5. Write all remaining unresolved items into the plan's `## Pending User Decisions` section. Use `DEC-N` identifiers. Set `Decision Status` to `PENDING`.
+   - For Claude-vs-Codex disagreements: fill `Claude Position`, `Codex Position`, and `Tradeoff Summary`
+   - For open questions (no opposing positions): set `Claude Position` to Claude's tentative answer (if any), `Codex Position` to `N/A - open question`, and `Tradeoff Summary` to the question's context
+
+This ensures:
+- When `HUMAN_REVIEW_REQUIRED=true`: items are visible for Steps 2-4 user resolution
+- When `HUMAN_REVIEW_REQUIRED=false`: items block auto-start via Phase 8 Step 5's `PENDING` check
 
 ### Step 2: Resolve Analysis Issues (when manual review is required)
 
@@ -279,6 +358,21 @@ Document the user's answer for each metric, as this distinction significantly af
 ---
 
 ### Step 4: Resolve Unresolved Claude/Codex Disagreements (when manual review is required)
+
+For every item marked `needs_user_decision`, explicitly ask the user to decide.
+
+For each unresolved disagreement, present:
+- The decision topic
+- Claude's position
+- Codex's position
+- Tradeoffs and risks of each option
+- A clear recommendation (if one option is materially safer)
+
+If the user does not decide immediately, keep the item in the plan as `PENDING` under a dedicated user-decision section.
+
+---
+
+## Phase 7: Final Plan Generation
 
 For every item marked `needs_user_decision`, explicitly ask the user to decide.
 
@@ -376,33 +470,14 @@ Example: "The implementation includes core feature X with basic validation"
 
 ## Task Breakdown
 
-Each task MUST include exactly one routing tag generated by the planning agent:
-- `coding`: implemented by Codex worker (`/humanize:codex-worker`, default: `gpt-5.3-codex:xhigh`)
-- `analyze`: executed via Codex analyzer (`/humanize:ask-codex`, default: `gpt-5.2:xhigh`, non-codex)
+Each task must include exactly one routing tag:
+- `coding`: implemented by Claude
+- `analyze`: executed via Codex (`/humanize:ask-codex`)
 
 | Task ID | Description | Target AC | Tag (`coding`/`analyze`) | Depends On |
 |---------|-------------|-----------|----------------------------|------------|
 | task1 | <...> | AC-1 | coding | - |
 | task2 | <...> | AC-2 | analyze | task1 |
-
-## Codex Team Workflow
-
-### Batch 1 - Planning Codex
-- Input: raw draft + repository context
-- Output: risk map, missing requirements, and plan critiques (Codex Analysis v1)
-
-### Batch 2 - Implementation Codex Team
-- Input: converged plan + concise implementation handoff summary
-- Output: implementation changes aligned to ACs and task dependencies
-- Handoff Summary:
-  - Scope:
-  - Key Constraints:
-  - High-Risk Areas:
-  - Required Validations:
-
-### Batch 3 - Review Codex Team
-- Input: implementation summaries and changed files
-- Output: independent quality review, risk checks, and final readiness verdict
 
 ## Claude-Codex Deliberation
 
@@ -412,10 +487,7 @@ Each task MUST include exactly one routing tag generated by the planning agent:
 ### Resolved Disagreements
 - <Topic>: Claude vs Codex summary, chosen resolution, and rationale
 
-## Convergence Log
-
-- Round 1: <Second Codex objections and Claude revisions>
-- Round 2: <Remaining disagreements and updates>
+### Convergence Status
 - Final Status: `converged` or `partially_converged`
 
 ## Pending User Decisions
@@ -432,6 +504,22 @@ Each task MUST include exactly one routing tag generated by the planning agent:
 - Implementation code and comments must NOT contain plan-specific terminology such as "AC-", "Milestone", "Step", "Phase", or similar workflow markers
 - These terms are for plan documentation only, not for the resulting codebase
 - Use descriptive, domain-appropriate naming in code instead
+
+## Output File Convention
+
+This template is used to produce the main output file (e.g., `plan.md`).
+
+### Translated Language Variant
+
+When `alternative_plan_language` resolves to a supported language name through merged config loading, a translated variant of the output file is also written after the main file. Humanize loads config from merged layers in this order: default config, optional user config, then optional project config; `alternative_plan_language` may be set at any of those layers. The variant filename is constructed by inserting `_<code>` (the ISO 639-1 code from the built-in mapping table) immediately before the file extension:
+
+- `plan.md` becomes `plan_<code>.md` (e.g. `plan_zh.md` for Chinese, `plan_ko.md` for Korean)
+- `docs/my-plan.md` becomes `docs/my-plan_<code>.md`
+- `output` (no extension) becomes `output_<code>`
+
+The translated variant file contains a full translation of the main plan file's current content in the configured language. All identifiers (`AC-*`, task IDs, file paths, API names, command flags) remain unchanged, as they are language-neutral.
+
+When `alternative_plan_language` is empty, absent, set to `"English"`, or set to an unsupported language, no translated variant is written. Humanize does not auto-create `.humanize/config.json` when no project config file is present.
 ```
 
 ### Generation Rules
@@ -456,23 +544,19 @@ Each task MUST include exactly one routing tag generated by the planning agent:
 
 10. **Respect Deterministic Designs**: If the draft specifies a fixed approach with no choices, reflect this in the plan by narrowing the path boundaries to match the user's specification.
 
-11. **Code Style Constraint**: The generated plan MUST include a section or note instructing that implementation code and comments should NOT contain plan-specific progress terminology such as "AC-", "Milestone", "Step", "Phase", or similar workflow markers. These terms belong in the plan document, not in the resulting codebase.
+11. **Draft Completeness Requirement**: The generated plan MUST incorporate ALL information from the input draft document without omission. The draft represents the most valuable human input and must be fully preserved. Any clarifications obtained through Phase 6 should be added incrementally to the draft's original content, never replacing or losing any original requirements. The final plan must be a superset of the draft information plus all clarified details.
 
-12. **Draft Completeness Requirement**: The generated plan MUST incorporate ALL information from the input draft document without omission. The draft represents the most valuable human input and must be fully preserved. Any clarifications obtained through Phase 6 should be added incrementally to the draft's original content, never replacing or losing any original requirements. The final plan must be a superset of the draft information plus all clarified details.
+12. **Debate Traceability**: The plan MUST include Codex-first findings, Claude/Codex agreements, resolved disagreements, and unresolved decisions. Unresolved opposite opinions MUST be recorded in `## Pending User Decisions` for explicit user decision.
 
-13. **Debate Traceability**: The plan MUST include Codex-first findings, Claude/Codex agreements, resolved disagreements, and unresolved decisions. Unresolved opposite opinions MUST be recorded in `## Pending User Decisions` for explicit user decision.
+13. **Convergence Requirement**: The plan MUST record Claude/Codex agreements, resolved disagreements, and final convergence status in `## Claude-Codex Deliberation`. Stop only when convergence conditions are met or max rounds reached with explicit carry-over decisions.
 
-14. **Convergence Requirement**: The plan MUST document multi-round reasonability review (`## Convergence Log`) and stop only when convergence conditions are met or max rounds reached with explicit carry-over decisions.
-
-15. **Task Tag Requirement**: The plan MUST include `## Task Breakdown`, and every task MUST be tagged as either `coding` or `analyze` (no untagged tasks, no other tag values).
-
-16. **Three-Batch Codex Workflow Requirement**: The plan MUST include `## Codex Team Workflow` and explicitly define Batch 1 (planning), Batch 2 (implementation handoff), and Batch 3 (independent review).
+14. **Task Tag Requirement**: The plan MUST include `## Task Breakdown`, and every task MUST be tagged as either `coding` or `analyze` (no untagged tasks, no other tag values).
 
 ---
 
 ## Phase 8: Write and Complete
 
-The output file already contains the plan template structure and the original draft content (combined during IO validation). Now complete the plan through the following steps:
+The output file already contains the plan template structure and the original draft content (combined after the relevance check). Now complete the plan through the following steps:
 
 ### Step 1: Update Plan Content
 
@@ -488,7 +572,6 @@ After updating, **read the complete plan file** and verify:
 - All sections are consistent with each other
 - The structured plan aligns with the original draft content
 - Claude/Codex disagreement handling is explicit and correctly reflected
-- Convergence rounds and termination status are explicitly recorded
 - No contradictions exist between different parts of the document
 
 If inconsistencies are found, fix them using the Edit tool.
@@ -502,43 +585,52 @@ Apply language rules to the updated structured plan:
 3. Keep identifiers unchanged (`AC-*`, task IDs, code paths, API names, command flags).
 4. Keep the original draft section intact at the bottom; do not rewrite or drop source content.
 
-### Step 4: Write Chinese-Only Variant (Conditional)
+### Step 4: Write Translated Language Variant (Conditional)
 
-If `CHINESE_PLAN_ENABLED=true`, write a `_zh` variant of the output file containing a full Chinese translation of the English plan:
+If `ALT_PLAN_LANGUAGE` is non-empty (translation enabled), write a translated variant of the output file.
 
-**Filename construction rule** - insert `_zh` immediately before the file extension:
-- `plan.md` becomes `plan_zh.md`
-- `docs/my-plan.md` becomes `docs/my-plan_zh.md`
-- `output` (no extension) becomes `output_zh`
+**Language Unification guard**: If the main plan file was unified to `ALT_PLAN_LANGUAGE` in Step 3 (Language Unification), skip this step. Log: `Main plan file is already in <ALT_PLAN_LANGUAGE>; translated variant not needed.`
+
+**Filename construction rule** - insert `_<ALT_PLAN_LANG_CODE>` immediately before the file extension:
+- `plan.md` becomes `plan_<code>.md` (e.g. `plan_zh.md`, `plan_ko.md`)
+- `docs/my-plan.md` becomes `docs/my-plan_<code>.md`
+- `output` (no extension) becomes `output_<code>`
 
 Algorithm:
 1. Find the last `.` in the base filename.
-2. If a `.` is found, insert `_zh` before it: `<stem>_zh.<extension>`.
-3. If no `.` is found (no extension), append `_zh` to the filename: `<filename>_zh`.
-4. The `_zh` file is placed in the same directory as the main output file.
+2. If a `.` is found, insert `_<ALT_PLAN_LANG_CODE>` before it: `<stem>_<code>.<extension>`.
+3. If no `.` is found (no extension), append `_<ALT_PLAN_LANG_CODE>` to the filename: `<filename>_<code>`.
+4. The variant file is placed in the same directory as the main output file.
 
-**Content of the `_zh` file**:
-- Translate the English plan content into Simplified Chinese.
+**Content of the variant file**:
+- Translate the main plan file's current content (after any Language Unification from Step 3) into `ALT_PLAN_LANGUAGE`. For Chinese, default to Simplified Chinese.
 - Section headings, AC labels, task IDs, file paths, API names, and command flags MUST remain unchanged (identifiers are language-neutral).
-- The `_zh` file is a Chinese-only reading view of the same plan; it must not add new information not present in the main file.
+- The variant file is a translated reading view of the same plan; it must not add new information not present in the main file.
 - The original draft section at the bottom should be kept as-is (not re-translated).
 
-If `CHINESE_PLAN_ENABLED=false` (the default), do NOT create the `_zh` file. The absence of `.humanize/config.json` or the absence of the `chinese_plan` field both imply `CHINESE_PLAN_ENABLED=false`; no error is raised.
+If `ALT_PLAN_LANGUAGE` is empty (the default), do NOT create a translated variant file.
 
 ### Step 5: Optional Direct Work Start
 
 If all of the following are true:
 - `AUTO_START_RLCR_IF_CONVERGED=true`
 - `PLAN_CONVERGENCE_STATUS=converged`
+- `GEN_PLAN_MODE=discussion`
 - There are no pending decisions with status `PENDING`
 
 Then start work immediately by running:
 
 ```bash
+/humanize:start-rlcr-loop <output-plan-path>
+```
+
+If the command invocation is not available in this context, fall back to the setup script:
+
+```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/setup-rlcr-loop.sh" --plan-file <output-plan-path>
 ```
 
-If the auto-start command fails, report the failure reason and provide the exact manual fallback command:
+If the auto-start attempt fails, report the failure reason and provide the exact manual command for the user to run:
 
 ```bash
 /humanize:start-rlcr-loop <output-plan-path>
@@ -552,8 +644,7 @@ Report to the user:
 - Number of acceptance criteria defined
 - Number of convergence rounds executed
 - Number of unresolved user decisions (if any)
-- Language mode used (English-only default, or Chinese `_zh` variant if enabled)
-- Whether a `_zh` Chinese-only variant was written, and its path (or note that `chinese_plan` is not enabled in `.humanize/config.json`)
+- Whether language was unified (if applicable)
 - Whether direct work start was attempted, and its result
 
 ---

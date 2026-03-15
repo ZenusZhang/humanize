@@ -1,12 +1,11 @@
 # Scratchpad
 temp
 
-# Workflow planning artifacts (not part of plugin source)
-workflow_backlog.md
-plans/
+# Local Claude client settings
+/.claude/settings.json
 
-# Humanize state directories (used by start-rlcr-loop)
-.humanize*
+# Humanize state directories (runtime-generated, project-local)
+.humanize/
 
 # Python cache
 __pycache__/

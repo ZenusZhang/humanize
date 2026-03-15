@@ -1,13 +1,65 @@
 ---
 description: "Start iterative loop with Codex review"
-argument-hint: "[path/to/plan.md | --plan-file path/to/plan.md] [--max N] [--codex-model MODEL:EFFORT] [--codex-timeout SECONDS] [--track-plan-file] [--push-every-round] [--base-branch BRANCH] [--full-review-round N] [--skip-impl] [--claude-answer-codex] [--agent-teams|--no-agent-teams] [--worktree-teams|--no-worktree-teams] [--worktree-root PATH] [--allow-empty-bitlesson-none|--require-bitlesson-entry-for-none]"
-allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-rlcr-loop.sh:*)"]
+argument-hint: "[path/to/plan.md | --plan-file path/to/plan.md] [--max N] [--codex-model MODEL:EFFORT] [--codex-timeout SECONDS] [--track-plan-file] [--push-every-round] [--base-branch BRANCH] [--full-review-round N] [--skip-impl] [--claude-answer-codex] [--agent-teams]"
+allowed-tools:
+  - "Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-rlcr-loop.sh:*)"
+  - "Read"
+  - "Task"
 hide-from-slash-command-tool: "true"
 ---
 
 # Start RLCR Loop
 
-Execute the setup script to initialize the loop:
+## Plan Compliance Pre-Check
+
+Before running the setup script, validate the plan file for compliance. This is a fool-proofing mechanism that catches obviously wrong plan files early.
+
+**Skip this entire pre-check if** any of these conditions are true:
+- `$ARGUMENTS` contains `--skip-impl` (no plan file to validate)
+- `$ARGUMENTS` contains `-h` or `--help` (just showing help)
+
+### Extract the plan file path from arguments
+
+Parse `$ARGUMENTS` to find the plan file path:
+- If `--plan-file <path>` is present, use `<path>`
+- Otherwise, use the first positional argument (the first argument that does not start with `--` and is not a value following a known flag like `--max`, `--codex-model`, `--codex-timeout`, `--base-branch`, `--full-review-round`, `--plan-file`)
+- If no plan file path can be determined, skip the pre-check and let the setup script handle the error
+
+### Basic path safety gate
+
+Only proceed with the pre-check if the extracted path meets ALL of these conditions:
+- Is a relative path (does not start with forward slash)
+- Does not contain parent directory traversal (double dot path components)
+- Contains only safe path characters: letters, digits, hyphen, underscore, dot, and forward slash
+
+If any condition fails, skip the pre-check and let the setup script handle path validation.
+
+### Read and validate plan content
+
+1. Use the Read tool to read the plan file. If the file does not exist or cannot be read, skip the pre-check and let the setup script handle the error.
+
+2. Use the Task tool to invoke the `humanize:plan-compliance-checker` agent (sonnet model):
+   ```
+   Task tool parameters:
+   - model: "sonnet"
+   - prompt: Include the plan file content and ask the agent to:
+     1. Explore the repository structure (README, CLAUDE.md, main files)
+     2. Check if the plan content relates to this repository
+     3. Check if the plan contains branch-switching instructions
+     4. Return exactly one of: `PASS: <summary>`, `FAIL_RELEVANCE: <reason>`, or `FAIL_BRANCH_SWITCH: <details>`
+   ```
+
+3. **Parse the result** (fail-closed):
+   - If output contains `PASS`: continue to setup script below
+   - If output contains `FAIL_RELEVANCE`: report "Plan compliance check failed: the plan does not appear to be related to this repository." Show the reason. **Stop the command.**
+   - If output contains `FAIL_BRANCH_SWITCH`: report "Plan compliance check failed: the plan contains branch-switching instructions, which are incompatible with RLCR. The RLCR loop requires the working branch to remain constant across all rounds." Show the details. **Stop the command.**
+   - If output contains none of the above (malformed): report "Plan compliance check produced unexpected output. Cannot proceed." **Stop the command.**
+
+---
+
+## Setup
+
+If the pre-check passed (or was skipped), execute the setup script to initialize the loop:
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/setup-rlcr-loop.sh" $ARGUMENTS
@@ -16,8 +68,8 @@ Execute the setup script to initialize the loop:
 This command starts an iterative development loop where:
 
 1. You execute the implementation plan with task-tag routing
-   - `coding` tasks: execute via `/humanize:codex-worker` (default: `gpt-5.3-codex:xhigh`)
-   - `analyze` tasks: execute via `/humanize:ask-codex` (default: `gpt-5.2:xhigh`, non-codex)
+   - `coding` tasks: Claude executes directly
+   - `analyze` tasks: execute via `/humanize:ask-codex`
 2. Write a summary of your work to the specified summary file
 3. When you try to exit, Codex reviews your summary
 4. If Codex finds issues, you receive feedback and continue
@@ -37,7 +89,7 @@ This loop uses a **Goal Tracker** to prevent goal drift across iterations:
 ### Key Features
 1. **Acceptance Criteria**: Each task maps to a specific AC - nothing can be "forgotten"
 2. **Task Tag Routing**: Every task should carry `coding` or `analyze` tag from plan generation
-   - `coding -> worker`, `analyze -> analyzer`
+   - `coding -> Claude`, `analyze -> Codex`
 3. **Plan Evolution Log**: If you discover the plan needs changes, document the change with justification
 4. **Explicit Deferrals**: Deferred tasks require strong justification and impact analysis
 5. **Full Alignment Checks**: At configurable intervals (default every 5 rounds: rounds 4, 9, 14, etc.), Codex conducts a comprehensive goal alignment audit. Use `--full-review-round N` to customize (min: 2)
@@ -70,6 +122,20 @@ Per round requirements:
 If a problem is solved only after multiple rounds, add or update a precise lesson entry in `bitlesson.md` (specific problem + specific solution).
 By default, empty `bitlesson.md` does not block `Action: none`; use `--require-bitlesson-entry-for-none` to enforce strict blocking.
 
+## BitLesson Workflow (Project Level)
+
+Each project must maintain its own `.humanize/bitlesson.md` file.
+If missing, `start-rlcr-loop` initializes it automatically with a strict template.
+
+Per round requirements:
+1. Read `.humanize/bitlesson.md` before execution
+2. Run `bitlesson-selector` for each task/sub-task
+3. Apply selected lesson IDs (or `NONE`) during implementation
+4. Include `## BitLesson Delta` in the round summary with `Action: none|add|update`
+
+If a problem is solved only after multiple rounds, add or update a precise lesson entry in `.humanize/bitlesson.md` (specific problem + specific solution).
+By default, empty `.humanize/bitlesson.md` does not block `Action: none`; use `--require-bitlesson-entry-for-none` to enforce strict blocking.
+
 ## Stopping the Loop
 
 - Reach the maximum iteration count
@@ -80,7 +146,7 @@ By default, empty `bitlesson.md` does not block `Action: none`; use `--require-b
 
 The RLCR loop has two phases within the active loop:
 
-1. **Implementation Phase**: Work by task tags (`coding -> /humanize:codex-worker`, `analyze -> /humanize:ask-codex`), then Codex reviews your summary
+1. **Implementation Phase**: Work by task tags (`coding -> Claude`, `analyze -> /humanize:ask-codex`), then Codex reviews your summary
 2. **Review Phase**: After COMPLETE, `codex review` checks code quality with `[P0-9]` severity markers
 
 The `--base-branch` option specifies the base branch for code review comparison. If not provided, it auto-detects from: remote default > local main > local master.

@@ -7,6 +7,14 @@ set -euo pipefail
 # ========================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+source "$SCRIPT_DIR/lib/config-loader.sh"
+source "$SCRIPT_DIR/lib/model-router.sh"
+
+PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+MERGED_CONFIG="$(load_merged_config "$PLUGIN_ROOT" "$PROJECT_ROOT")"
+BITLESSON_MODEL="$(get_config_value "$MERGED_CONFIG" "bitlesson_model")"
+BITLESSON_MODEL="${BITLESSON_MODEL:-haiku}"
 
 # Source portable timeout wrapper
 source "$SCRIPT_DIR/portable-timeout.sh"
@@ -74,11 +82,21 @@ if [[ -z "$BITLESSON_FILE" ]]; then
     exit 1
 fi
 
-if ! command -v codex &>/dev/null; then
-    echo "Error: 'codex' command is not installed or not in PATH" >&2
-    echo "" >&2
-    echo "Please install Codex CLI: https://github.com/openai/codex" >&2
-    exit 1
+# ========================================
+# Determine Provider from BITLESSON_MODEL
+# ========================================
+
+BITLESSON_PROVIDER="$(detect_provider "$BITLESSON_MODEL")"
+
+# ========================================
+# Conditional Dependency Check (with fallback)
+# ========================================
+
+if ! check_provider_dependency "$BITLESSON_PROVIDER" 2>/dev/null; then
+    # Fall back to codex provider when the configured provider binary is missing
+    BITLESSON_MODEL="$DEFAULT_CODEX_MODEL"
+    BITLESSON_PROVIDER="codex"
+    check_provider_dependency "$BITLESSON_PROVIDER"
 fi
 
 if [[ ! -f "$BITLESSON_FILE" ]]; then
@@ -98,9 +116,9 @@ fi
 
 BITLESSON_DIR="$(cd "$(dirname "$BITLESSON_FILE")" && pwd -P)"
 if git -C "$BITLESSON_DIR" rev-parse --show-toplevel &>/dev/null; then
-    PROJECT_ROOT="$(git -C "$BITLESSON_DIR" rev-parse --show-toplevel)"
+    CODEX_PROJECT_ROOT="$(git -C "$BITLESSON_DIR" rev-parse --show-toplevel)"
 else
-    PROJECT_ROOT="$BITLESSON_DIR"
+    CODEX_PROJECT_ROOT="$BITLESSON_DIR"
 fi
 
 # ========================================
@@ -110,7 +128,7 @@ fi
 PROMPT="$(cat <<EOF
 # BitLesson Selector
 
-You select which lessons from \`bitlesson.md\` must be applied for a given sub-task.
+You select which lessons from the configured BitLesson file (normally \`.humanize/bitlesson.md\`) must be applied for a given sub-task.
 
 ## Input
 
@@ -120,7 +138,7 @@ $TASK
 Related file paths (comma-separated):
 $PATHS
 
-Project \`bitlesson.md\` content:
+BitLesson file content:
 <<<BEGIN_BITLESSON_MD
 $BITLESSON_CONTENT
 <<<END_BITLESSON_MD
@@ -141,22 +159,26 @@ EOF
 )"
 
 # ========================================
-# Run Codex Selector (fast path)
+# Run Selector (Codex or Claude)
 # ========================================
 
 SELECTOR_TIMEOUT=120
 
-CODEX_EXEC_ARGS=("-m" "gpt-5.2" "-c" "model_reasoning_effort=high")
-
-# Determine automation flag based on environment variable (same as ask-codex.sh)
-CODEX_AUTO_FLAG="--full-auto"
-if [[ "${HUMANIZE_CODEX_BYPASS_SANDBOX:-}" == "true" ]] || [[ "${HUMANIZE_CODEX_BYPASS_SANDBOX:-}" == "1" ]]; then
-    CODEX_AUTO_FLAG="--dangerously-bypass-approvals-and-sandbox"
-fi
-CODEX_EXEC_ARGS+=("$CODEX_AUTO_FLAG" "-C" "$PROJECT_ROOT")
-
 CODEX_EXIT_CODE=0
-RAW_OUTPUT="$(printf '%s' "$PROMPT" | run_with_timeout "$SELECTOR_TIMEOUT" codex exec "${CODEX_EXEC_ARGS[@]}" -)" || CODEX_EXIT_CODE=$?
+if [[ "$BITLESSON_PROVIDER" == "codex" ]]; then
+    CODEX_EXEC_ARGS=("-m" "$BITLESSON_MODEL" "-c" "model_reasoning_effort=high")
+
+    # Determine automation flag based on environment variable (same as ask-codex.sh)
+    CODEX_AUTO_FLAG="--full-auto"
+    if [[ "${HUMANIZE_CODEX_BYPASS_SANDBOX:-}" == "true" ]] || [[ "${HUMANIZE_CODEX_BYPASS_SANDBOX:-}" == "1" ]]; then
+        CODEX_AUTO_FLAG="--dangerously-bypass-approvals-and-sandbox"
+    fi
+    CODEX_EXEC_ARGS+=("$CODEX_AUTO_FLAG" "-C" "$CODEX_PROJECT_ROOT")
+
+    RAW_OUTPUT="$(printf '%s' "$PROMPT" | run_with_timeout "$SELECTOR_TIMEOUT" codex exec "${CODEX_EXEC_ARGS[@]}")" || CODEX_EXIT_CODE=$?
+elif [[ "$BITLESSON_PROVIDER" == "claude" ]]; then
+    RAW_OUTPUT="$(printf '%s' "$PROMPT" | run_with_timeout "$SELECTOR_TIMEOUT" claude --print --model "$BITLESSON_MODEL")" || CODEX_EXIT_CODE=$?
+fi
 
 if [[ $CODEX_EXIT_CODE -eq 124 ]]; then
     echo "Error: BitLesson selector timed out after ${SELECTOR_TIMEOUT} seconds" >&2
