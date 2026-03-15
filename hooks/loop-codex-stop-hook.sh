@@ -1867,7 +1867,7 @@ if [[ "$WORKTREE_TEAMS" == "true" ]] && [[ "$REVIEW_STARTED" != "true" ]]; then
 
 Continue using scheduler/worker/reviewer worktree orchestration.
 Each task must be explicitly marked parallelizable (`yes` or `no`) before assignment.
-WORKTREE_TEAMS_FALLBACK_EOF
+AGENT_TEAMS_FALLBACK_EOF
     fi
 fi
 

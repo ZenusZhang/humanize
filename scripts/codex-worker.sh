@@ -27,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # Source portable timeout wrapper
 source "$SCRIPT_DIR/portable-timeout.sh"
 
-# Source shared loop library for DEFAULT_CODEX_WORKER_MODEL and DEFAULT_CODEX_WORKER_EFFORT
+# Source shared loop library for DEFAULT_CODEX_MODEL and DEFAULT_CODEX_EFFORT
 HOOKS_LIB_DIR="$(cd "$SCRIPT_DIR/../hooks/lib" && pwd)"
 source "$HOOKS_LIB_DIR/loop-common.sh"
 
@@ -37,8 +37,8 @@ source "$HOOKS_LIB_DIR/loop-common.sh"
 
 DEFAULT_CODEX_WORKER_TIMEOUT=5400
 
-WORKER_MODEL="$DEFAULT_CODEX_WORKER_MODEL"
-WORKER_EFFORT="$DEFAULT_CODEX_WORKER_EFFORT"
+WORKER_MODEL="$DEFAULT_CODEX_MODEL"
+WORKER_EFFORT="$DEFAULT_CODEX_EFFORT"
 WORKER_TIMEOUT="$DEFAULT_CODEX_WORKER_TIMEOUT"
 WORKDIR=""
 
@@ -103,7 +103,7 @@ while [[ $# -gt 0 ]]; do
                 WORKER_EFFORT="${2#*:}"
             else
                 WORKER_MODEL="$2"
-                WORKER_EFFORT="$DEFAULT_CODEX_WORKER_EFFORT"
+                WORKER_EFFORT="$DEFAULT_CODEX_EFFORT"
             fi
             shift 2
             ;;
