@@ -90,6 +90,7 @@ TEST_SUITES=(
     "test-pr-loop-2-hooks.sh"
     "test-pr-loop-3-stophook.sh"
     "test-pr-loop-system.sh"
+    "test-humanize-plugin-worktree.sh"
     # Session ID and Agent Teams tests
     "test-session-id.sh"
     "test-agent-teams.sh"

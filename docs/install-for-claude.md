@@ -26,6 +26,37 @@ If you have the plugin cloned locally:
 claude --plugin-dir /path/to/humanize
 ```
 
+### Recommended Branch Workflow
+
+If you actively switch between `main` and feature branches, do not keep reinstalling the plugin.
+Use branch-specific git worktrees and launch Claude with the matching plugin directory instead:
+
+```bash
+# Ensure a dedicated plugin worktree for a branch
+scripts/humanize-plugin-worktree.sh ensure --branch main
+scripts/humanize-plugin-worktree.sh ensure --branch feat/refine-plan
+
+# Launch Claude against a target project with the selected plugin branch
+scripts/humanize-plugin-worktree.sh launch --branch main --project /path/to/target-project
+scripts/humanize-plugin-worktree.sh launch --branch feat/refine-plan --project /path/to/target-project
+```
+
+Why this is better:
+
+- No repeated `/plugin install` step when switching plugin branches
+- Each branch gets a stable, dedicated plugin path
+- The bundled `statusline.sh` now shows `Plugin: <branch>@<commit>` so you can immediately tell which Humanize branch Claude is running
+
+Useful helpers:
+
+```bash
+# Show all Humanize repo worktrees
+scripts/humanize-plugin-worktree.sh list
+
+# Inspect the plugin identity for a worktree or install copy
+scripts/humanize-plugin-worktree.sh info --plugin-dir ~/.claude/plugin-sources/humanize-worktrees/feat_refine-plan
+```
+
 ## Option 3: Try Experimental Features (dev branch)
 
 The `dev` branch contains experimental features that are not yet released to `main`. To try them locally:

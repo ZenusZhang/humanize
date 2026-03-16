@@ -23,6 +23,55 @@ get_value() {
     echo "$input" | jq -r "$1 // empty" 2>/dev/null
 }
 
+STATUSLINE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+DEFAULT_HUMANIZE_PLUGIN_DIR="$(cd "$STATUSLINE_SCRIPT_DIR/.." && pwd)"
+HUMANIZE_PLUGIN_DIR="${HUMANIZE_PLUGIN_DIR:-$DEFAULT_HUMANIZE_PLUGIN_DIR}"
+
+read_humanize_plugin_version() {
+    local manifest="$1/.claude-plugin/plugin.json"
+    if [[ ! -f "$manifest" ]]; then
+        echo ""
+        return
+    fi
+    jq -r '.version // empty' "$manifest" 2>/dev/null
+}
+
+get_humanize_plugin_label() {
+    local plugin_dir="$1"
+    local branch="${HUMANIZE_PLUGIN_BRANCH:-}"
+    local version="${HUMANIZE_PLUGIN_VERSION:-}"
+    local commit=""
+    local dirty_mark=""
+
+    if git -C "$plugin_dir" rev-parse --show-toplevel >/dev/null 2>&1; then
+        branch=$(git -C "$plugin_dir" branch --show-current 2>/dev/null || true)
+        commit=$(git -C "$plugin_dir" rev-parse --short HEAD 2>/dev/null || true)
+        if [[ -n "$(git -C "$plugin_dir" status --porcelain 2>/dev/null || true)" ]]; then
+            dirty_mark="*"
+        fi
+        if [[ -n "$branch" ]]; then
+            if [[ -n "$commit" ]]; then
+                echo "${branch}@${commit}${dirty_mark}"
+            else
+                echo "${branch}${dirty_mark}"
+            fi
+            return
+        fi
+    fi
+
+    if [[ -z "$version" ]]; then
+        version=$(read_humanize_plugin_version "$plugin_dir")
+    fi
+
+    if [[ -n "$branch" ]]; then
+        echo "${branch}${dirty_mark}"
+    elif [[ -n "$version" ]]; then
+        echo "v${version}"
+    else
+        echo "$(basename "$plugin_dir")"
+    fi
+}
+
 # Format milliseconds as Xh:Ym:Zs
 format_duration() {
     local ms=$1
@@ -257,6 +306,7 @@ else
     RLCR_STATUS="Off"
 fi
 RLCR_COLOR=$(get_rlcr_color "$RLCR_STATUS")
+PLUGIN_LABEL=$(get_humanize_plugin_label "$HUMANIZE_PLUGIN_DIR")
 
 # Get color for fast mode status
 get_fast_color() {
@@ -360,21 +410,28 @@ P4=$(printf "%s [%s]" "${CWD_SHORT:-?}" "$BRANCH")
 F5=$(printf "lines: %b+%s%b, %b-%s%b" "$GREEN" "$LINES_ADDED" "$RESET" "$RED" "$LINES_REMOVED" "$RESET")
 P5=$(printf "lines: +%s, -%s" "$LINES_ADDED" "$LINES_REMOVED")
 
-F6=$(printf "%bSession:%b %b%s%b" "$MAGENTA" "$RESET" "$CYAN" "${SESSION_DISPLAY:-?}" "$RESET")
-P6=$(printf "Session: %s" "${SESSION_DISPLAY:-?}")
+F6=$(printf "%bPlugin:%b %b%s%b" "$BLUE" "$RESET" "$YELLOW" "$PLUGIN_LABEL" "$RESET")
+P6=$(printf "Plugin: %s" "$PLUGIN_LABEL")
 
-F7=$(printf "%bFast:%b %b%s%b" "$MAGENTA" "$RESET" "$FAST_COLOR" "$FAST_MODE" "$RESET")
-P7=$(printf "Fast: %s" "$FAST_MODE")
+F7=$(printf "%bSession:%b %b%s%b" "$MAGENTA" "$RESET" "$CYAN" "${SESSION_DISPLAY:-?}" "$RESET")
+P7=$(printf "Session: %s" "${SESSION_DISPLAY:-?}")
 
-F8=$(printf "%bRLCR:%b %b%s%b" "$MAGENTA" "$RESET" "$RLCR_COLOR" "$RLCR_STATUS" "$RESET")
-P8=$(printf "RLCR: %s" "$RLCR_STATUS")
+F8=$(printf "%bFast:%b %b%s%b" "$MAGENTA" "$RESET" "$FAST_COLOR" "$FAST_MODE" "$RESET")
+P8=$(printf "Fast: %s" "$FAST_MODE")
 
-FIELDS=("$F1" "$F2" "$F3" "$F4" "$F5" "$F6" "$F7" "$F8")
-PLAINS=("$P1" "$P2" "$P3" "$P4" "$P5" "$P6" "$P7" "$P8")
+F9=$(printf "%bRLCR:%b %b%s%b" "$MAGENTA" "$RESET" "$RLCR_COLOR" "$RLCR_STATUS" "$RESET")
+P9=$(printf "RLCR: %s" "$RLCR_STATUS")
+
+FIELDS=("$F1" "$F2" "$F3" "$F4" "$F5" "$F6" "$F7" "$F8" "$F9")
+PLAINS=("$P1" "$P2" "$P3" "$P4" "$P5" "$P6" "$P7" "$P8" "$P9")
 
 # Get terminal width via /dev/tty (stdin is piped, so tput/stty need the real TTY)
-TERM_WIDTH=$(stty size < /dev/tty 2>/dev/null | awk '{print $2}')
-TERM_WIDTH=${TERM_WIDTH:-$(tput cols 2>/dev/tty || echo 80)}
+TERM_WIDTH=""
+if [[ -t 1 ]] && [[ -r /dev/tty ]]; then
+    TERM_WIDTH=$(stty size < /dev/tty 2>/dev/null | awk '{print $2}')
+    TERM_WIDTH=${TERM_WIDTH:-$(tput cols 2>/dev/tty 2>/dev/null || true)}
+fi
+TERM_WIDTH=${TERM_WIDTH:-80}
 MAX_WIDTH=$(( TERM_WIDTH * 75 / 100 ))
 
 # Greedily pack fields into lines, wrapping when adding a field exceeds MAX_WIDTH
