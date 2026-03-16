@@ -137,10 +137,10 @@ else
     fail "agent_teams: true recorded in state.md with --agent-teams" "agent_teams: true" "$(grep 'agent_teams' "$STATE_FILE" 2>/dev/null || echo 'not found')"
 fi
 
-if [[ -n "$STATE_FILE" ]] && grep -q "^delegation_enforcement: warn" "$STATE_FILE"; then
-    pass "delegation_enforcement defaults to warn in state.md when env is unset"
+if [[ -n "$STATE_FILE" ]] && grep -q "^delegation_enforcement: strict" "$STATE_FILE"; then
+    pass "delegation_enforcement defaults to strict in state.md when env is unset"
 else
-    fail "delegation_enforcement defaults to warn in state.md when env is unset" "delegation_enforcement: warn" "$(grep 'delegation_enforcement' "$STATE_FILE" 2>/dev/null || echo 'not found')"
+    fail "delegation_enforcement defaults to strict in state.md when env is unset" "delegation_enforcement: strict" "$(grep 'delegation_enforcement' "$STATE_FILE" 2>/dev/null || echo 'not found')"
 fi
 
 # ========================================

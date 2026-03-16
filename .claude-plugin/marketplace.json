@@ -8,7 +8,7 @@
       "name": "humanize",
       "source": "./",
       "description": "Humanize - An iterative development plugin that uses a Codex CLI worker (gpt-5.4) for implementation and a separate Codex CLI analyzer/reviewer (gpt-5.4, non-codex) for independent review (cross-vendor style).",
-      "version": "1.11.3"
+      "version": "1.11.4"
     }
   ]
 }

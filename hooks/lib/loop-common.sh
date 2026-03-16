@@ -941,6 +941,58 @@ is_in_any_loop_dir() {
     is_in_humanize_loop_dir "$path" || is_in_pr_loop_dir "$path"
 }
 
+# Returns 0 when the active RLCR loop is in strict delegation mode for Claude.
+# This applies only to implementation rounds in agent-teams mode.
+strict_delegation_mode_active() {
+    [[ "${STATE_AGENT_TEAMS:-false}" == "true" ]] || return 1
+    [[ "${STATE_DELEGATION_ENFORCEMENT:-warn}" == "strict" ]] || return 1
+    [[ "${STATE_REVIEW_STARTED:-}" == "false" ]] || return 1
+    return 0
+}
+
+# Allow Claude to keep coordination artifacts up to date even in strict mode.
+# Source-code changes must go through /humanize:codex-worker.
+is_delegation_coordinator_path() {
+    local path="$1"
+    local path_lower
+    local basename_lower
+
+    path_lower=$(to_lower "$path")
+    basename_lower=$(basename "$path_lower")
+
+    if echo "$path_lower" | grep -q '\.humanize/'; then
+        return 0
+    fi
+
+    [[ "$basename_lower" == "bitlesson.md" ]]
+}
+
+# Standard message for blocking direct Claude implementation in strict mode.
+# Usage: strict_delegation_blocked_message "edit" "`path`" "$current_round"
+strict_delegation_blocked_message() {
+    local action="$1"
+    local target="$2"
+    local current_round="$3"
+    local fallback="# Strict Delegation Required
+
+This RLCR loop is running in strict delegation mode for round {{CURRENT_ROUND}}.
+
+Claude must not {{ACTION}} {{TARGET}} directly. In strict mode, source-code changes
+must go through \`/humanize:codex-worker\`.
+
+Allowed coordinator actions:
+- update \`.humanize/\` coordination files
+- update \`bitlesson.md\` when required by the workflow
+- inspect files, diffs, and run non-mutating commands
+
+Next step: invoke \`/humanize:codex-worker\` for the coding task, then continue coordinating from Claude."
+
+    load_and_render_safe "$TEMPLATE_DIR" "block/strict-delegation-required.md" "$fallback" \
+        "ACTION=$action" \
+        "TARGET=$target" \
+        "CURRENT_ROUND=$current_round"
+}
+
 # Find the most recent active PR loop directory with state.md
 # Similar to find_active_loop but for PR loops
 # Outputs the directory path to stdout, or empty string if none found

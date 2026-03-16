@@ -154,6 +154,38 @@ else
     fail "Path traversal to state.md" "exit 2 (blocked)" "exit $EXIT_CODE, result: $RESULT"
 fi
 
+# Test 5c: Strict delegation blocks direct source edits outside .humanize
+echo ""
+echo "Test 5c: Strict delegation blocks direct source edits"
+mkdir -p "$TEST_DIR/strict-edit/.humanize/rlcr/2026-01-19_13-00-00"
+cat > "$TEST_DIR/strict-edit/.humanize/rlcr/2026-01-19_13-00-00/state.md" << 'EOF'
+---
+current_round: 2
+max_iterations: 42
+plan_file: plan.md
+start_branch: main
+base_branch: main
+push_every_round: false
+codex_model: o3-mini
+codex_effort: medium
+codex_timeout: 1200
+review_started: false
+plan_tracked: false
+agent_teams: true
+delegation_enforcement: strict
+---
+EOF
+JSON='{"tool_name":"Edit","tool_input":{"file_path":"'"$TEST_DIR"'/strict-edit/src/app.py","old_string":"old","new_string":"new"}}'
+set +e
+RESULT=$(echo "$JSON" | CLAUDE_PROJECT_DIR="$TEST_DIR/strict-edit" bash "$PROJECT_ROOT/hooks/loop-edit-validator.sh" 2>&1)
+EXIT_CODE=$?
+set -e
+if [[ $EXIT_CODE -eq 2 ]] && echo "$RESULT" | grep -qi "strict delegation required"; then
+    pass "Strict delegation blocks direct source edits (exit 2)"
+else
+    fail "Strict delegation source edit" "exit 2 with strict delegation message" "exit $EXIT_CODE, result: $RESULT"
+fi
+
 # ========================================
 # Plan File Validator Tests
 # ========================================
@@ -381,6 +413,38 @@ else
     fail "Unrelated command" "allowed through" "exit $EXIT_CODE, result: $RESULT"
 fi
 
+# Test 12d: Strict delegation blocks mutating Bash before direct implementation
+echo ""
+echo "Test 12d: Strict delegation blocks mutating Bash commands"
+mkdir -p "$TEST_DIR/strict-bash/.humanize/rlcr/2026-01-19_13-30-00"
+cat > "$TEST_DIR/strict-bash/.humanize/rlcr/2026-01-19_13-30-00/state.md" << 'EOF'
+---
+current_round: 2
+max_iterations: 42
+plan_file: plan.md
+start_branch: main
+base_branch: main
+push_every_round: false
+codex_model: o3-mini
+codex_effort: medium
+codex_timeout: 1200
+review_started: false
+plan_tracked: false
+agent_teams: true
+delegation_enforcement: strict
+---
+EOF
+JSON='{"tool_name":"Bash","tool_input":{"command":"touch src/new_file.py"}}'
+set +e
+RESULT=$(echo "$JSON" | CLAUDE_PROJECT_DIR="$TEST_DIR/strict-bash" bash "$PROJECT_ROOT/hooks/loop-bash-validator.sh" 2>&1)
+EXIT_CODE=$?
+set -e
+if [[ $EXIT_CODE -eq 2 ]] && echo "$RESULT" | grep -qi "strict delegation required"; then
+    pass "Strict delegation blocks mutating Bash commands (exit 2)"
+else
+    fail "Strict delegation Bash mutation" "exit 2 with strict delegation message" "exit $EXIT_CODE, result: $RESULT"
+fi
+
 # Test 13: Edit validator handles newlines in strings
 echo ""
 echo "Test 13: Edit validator handles newlines in strings"
@@ -408,6 +472,52 @@ if [[ $EXIT_CODE -lt 128 ]]; then
     pass "Write handles binary-looking content (exit $EXIT_CODE)"
 else
     fail "Binary content handling" "exit < 128" "exit $EXIT_CODE"
+fi
+
+# Test 14b: Strict delegation blocks direct source writes outside .humanize
+echo ""
+echo "Test 14b: Strict delegation blocks direct source writes"
+mkdir -p "$TEST_DIR/strict-write/.humanize/rlcr/2026-01-19_14-00-00"
+cat > "$TEST_DIR/strict-write/.humanize/rlcr/2026-01-19_14-00-00/state.md" << 'EOF'
+---
+current_round: 2
+max_iterations: 42
+plan_file: plan.md
+start_branch: main
+base_branch: main
+push_every_round: false
+codex_model: o3-mini
+codex_effort: medium
+codex_timeout: 1200
+review_started: false
+plan_tracked: false
+agent_teams: true
+delegation_enforcement: strict
+---
+EOF
+JSON='{"tool_name":"Write","tool_input":{"file_path":"'"$TEST_DIR"'/strict-write/src/new_file.py","content":"print(1)"}}'
+set +e
+RESULT=$(echo "$JSON" | CLAUDE_PROJECT_DIR="$TEST_DIR/strict-write" bash "$PROJECT_ROOT/hooks/loop-write-validator.sh" 2>&1)
+EXIT_CODE=$?
+set -e
+if [[ $EXIT_CODE -eq 2 ]] && echo "$RESULT" | grep -qi "strict delegation required"; then
+    pass "Strict delegation blocks direct source writes (exit 2)"
+else
+    fail "Strict delegation source write" "exit 2 with strict delegation message" "exit $EXIT_CODE, result: $RESULT"
+fi
+
+# Test 14c: Strict delegation still allows bitlesson.md updates
+echo ""
+echo "Test 14c: Strict delegation allows bitlesson.md writes"
+JSON='{"tool_name":"Write","tool_input":{"file_path":"'"$TEST_DIR"'/strict-write/bitlesson.md","content":"# BitLesson\n"}}'
+set +e
+RESULT=$(echo "$JSON" | CLAUDE_PROJECT_DIR="$TEST_DIR/strict-write" bash "$PROJECT_ROOT/hooks/loop-write-validator.sh" 2>&1)
+EXIT_CODE=$?
+set -e
+if [[ $EXIT_CODE -eq 0 ]] && ! echo "$RESULT" | grep -q '"decision".*:.*"block"'; then
+    pass "Strict delegation allows bitlesson.md writes"
+else
+    fail "Strict delegation bitlesson allow" "exit 0 without block" "exit $EXIT_CODE, result: $RESULT"
 fi
 
 # ========================================

@@ -17,6 +17,38 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib/loop-common.sh"
 
+bash_command_looks_mutating() {
+    local command_lower="$1"
+    local patterns=(
+        '(^|[[:space:]])(mkdir|touch|install|ln|chmod|chown|chgrp|rm|mv|cp|truncate|patch)([[:space:]]|$)'
+        '(^|[[:space:]])git[[:space:]]+([^[:space:]]+[[:space:]]+)*(add|commit|apply|am|cherry-pick|merge|rebase|restore)([[:space:]]|$)'
+        '(^|[[:space:]])sed[[:space:]]+-i([[:space:]]|$)'
+        '(^|[[:space:]])awk[[:space:]]+-i[[:space:]]+inplace([[:space:]]|$)'
+        '(^|[[:space:]])perl[[:space:]]+-[^[:space:]]*i'
+        '(^|[[:space:]])tee([[:space:]]|$)'
+        '(^|[[:space:]])dd[[:space:]].*of='
+    )
+
+    for pattern in "${patterns[@]}"; do
+        if echo "$command_lower" | grep -qE "$pattern"; then
+            return 0
+        fi
+    done
+
+    if echo "$command_lower" | grep -qE '(^|[;&|])[[:space:]]*(cat|echo|printf)[^|;]*>>?[[:space:]]*[^[:space:]]+'; then
+        if ! echo "$command_lower" | grep -qE '>>?[[:space:]]*/dev/null([[:space:];|&]|$)'; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+bash_command_targets_coordination_artifact() {
+    local command_lower="$1"
+    echo "$command_lower" | grep -qE '(^|[^[:alnum:]_])bitlesson\.md($|[^[:alnum:]_])|\.humanize/'
+}
+
 # ========================================
 # Parse Hook Input
 # ========================================
@@ -84,6 +116,11 @@ if [[ -n "$ACTIVE_LOOP_DIR" ]]; then
         exit 1
     fi
     CURRENT_ROUND="$STATE_CURRENT_ROUND"
+
+    if strict_delegation_mode_active && bash_command_looks_mutating "$COMMAND_LOWER" && ! bash_command_targets_coordination_artifact "$COMMAND_LOWER"; then
+        strict_delegation_blocked_message "run code-modifying Bash commands against" "the repository" "$CURRENT_ROUND" >&2
+        exit 2
+    fi
 
     # ========================================
     # Block Git Push When push_every_round is false

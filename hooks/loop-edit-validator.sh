@@ -34,6 +34,23 @@ FILE_PATH_LOWER=$(to_lower "$FILE_PATH")
 # Extract session_id from hook input for session-aware loop filtering
 HOOK_SESSION_ID=$(extract_session_id "$HOOK_INPUT")
 
+# Precompute active RLCR state for delegation enforcement and round validation.
+PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+LOOP_BASE_DIR="$PROJECT_ROOT/.humanize/rlcr"
+ACTIVE_LOOP_DIR=$(find_active_loop "$LOOP_BASE_DIR" "$HOOK_SESSION_ID")
+CURRENT_ROUND=""
+STRICT_DELEGATION_ACTIVE="false"
+
+if [[ -n "$ACTIVE_LOOP_DIR" ]]; then
+    STATE_FILE_TO_PARSE=$(resolve_active_state_file "$ACTIVE_LOOP_DIR")
+    if [[ -n "$STATE_FILE_TO_PARSE" ]] && parse_state_file "$STATE_FILE_TO_PARSE" 2>/dev/null; then
+        CURRENT_ROUND="${STATE_CURRENT_ROUND:-0}"
+        if strict_delegation_mode_active; then
+            STRICT_DELEGATION_ACTIVE="true"
+        fi
+    fi
+fi
+
 # ========================================
 # Block Todos and Prompt Files
 # ========================================
@@ -84,6 +101,10 @@ fi
 # ========================================
 
 if ! is_in_humanize_loop_dir "$FILE_PATH"; then
+    if [[ "$STRICT_DELEGATION_ACTIVE" == "true" ]] && ! is_delegation_coordinator_path "$FILE_PATH"; then
+        strict_delegation_blocked_message "edit" "\`$FILE_PATH\`" "${CURRENT_ROUND:-0}" >&2
+        exit 2
+    fi
     exit 0
 fi
 
@@ -93,7 +114,7 @@ fi
 
 PROJECT_ROOT="${PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
 LOOP_BASE_DIR="${LOOP_BASE_DIR:-$PROJECT_ROOT/.humanize/rlcr}"
-ACTIVE_LOOP_DIR="${LOOP_DIR:-$(find_active_loop "$LOOP_BASE_DIR" "$HOOK_SESSION_ID")}"
+ACTIVE_LOOP_DIR="${ACTIVE_LOOP_DIR:-$(find_active_loop "$LOOP_BASE_DIR" "$HOOK_SESSION_ID")}"
 
 if [[ -z "$ACTIVE_LOOP_DIR" ]]; then
     exit 0

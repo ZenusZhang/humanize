@@ -56,7 +56,7 @@ AGENT_TEAMS_EXPLICIT="false"
 WORKTREE_TEAMS_EXPLICIT="false"
 WORKTREE_ROOT=""
 BITLESSON_ALLOW_EMPTY_NONE="true"
-DELEGATION_ENFORCEMENT="${HUMANIZE_CODEX_DELEGATION_ENFORCEMENT:-warn}"
+DELEGATION_ENFORCEMENT="${HUMANIZE_CODEX_DELEGATION_ENFORCEMENT:-strict}"
 
 show_help() {
     cat <<HELP_EOF
@@ -111,7 +111,7 @@ OPTIONS:
                        one concrete lesson entry in `bitlesson.md`
   HUMANIZE_CODEX_DELEGATION_ENFORCEMENT
                        Delegation enforcement level for agent-team prompting.
-                       Allowed values: warn, strict (default: warn)
+                       Allowed values: warn, strict (default: strict)
   -h, --help           Show this help message
 
 DESCRIPTION:
