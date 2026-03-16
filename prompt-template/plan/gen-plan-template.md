@@ -74,32 +74,13 @@ Example: "The implementation includes core feature X with basic validation"
 ## Task Breakdown
 
 Each task must include exactly one routing tag:
-- `coding`: implemented by Codex worker (`/humanize:codex-worker`, default: `gpt-5.4:xhigh`)
-- `analyze`: executed via Codex analyzer (`/humanize:ask-codex`, default: `gpt-5.4:xhigh`, non-codex)
+- `coding`: implemented by Claude
+- `analyze`: executed via Codex (`/humanize:ask-codex`)
 
 | Task ID | Description | Target AC | Tag (`coding`/`analyze`) | Depends On |
 |---------|-------------|-----------|----------------------------|------------|
 | task1 | <...> | AC-1 | coding | - |
 | task2 | <...> | AC-2 | analyze | task1 |
-
-## Codex Team Workflow
-
-### Batch 1 - Planning Codex
-- Input: raw draft + repository context
-- Output: risk map, missing requirements, and plan critiques
-
-### Batch 2 - Implementation Codex Team
-- Input: converged plan + concise implementation handoff summary
-- Output: implementation changes aligned to ACs and task dependencies
-- Handoff Summary:
-  - Scope:
-  - Key Constraints:
-  - High-Risk Areas:
-  - Required Validations:
-
-### Batch 3 - Review Codex Team
-- Input: implementation summaries and changed files
-- Output: independent quality review, risk checks, and final readiness verdict
 
 ## Claude-Codex Deliberation
 
@@ -109,10 +90,7 @@ Each task must include exactly one routing tag:
 ### Resolved Disagreements
 - <Topic>: Claude vs Codex summary, chosen resolution, and rationale
 
-## Convergence Log
-
-- Round 1: <Second Codex objections and Claude revisions>
-- Round 2: <Remaining disagreements and updates>
+### Convergence Status
 - Final Status: `converged` or `partially_converged`
 
 ## Pending User Decisions
@@ -134,14 +112,14 @@ Each task must include exactly one routing tag:
 
 This template is used to produce the main output file (e.g., `plan.md`).
 
-### Chinese-Only Variant (`_zh` file)
+### Translated Language Variant
 
-When `chinese_plan=true` is set in `.humanize/config.json`, a `_zh` variant of the output file is also written after the main file. The `_zh` filename is constructed by inserting `_zh` immediately before the file extension:
+When `alternative_plan_language` resolves to a supported language name through merged config loading, a translated variant of the output file is also written after the main file. Humanize loads config from merged layers in this order: default config, optional user config, then optional project config; `alternative_plan_language` may be set at any of those layers. The variant filename is constructed by inserting `_<code>` (the ISO 639-1 code from the built-in mapping table) immediately before the file extension:
 
-- `plan.md` becomes `plan_zh.md`
-- `docs/my-plan.md` becomes `docs/my-plan_zh.md`
-- `output` (no extension) becomes `output_zh`
+- `plan.md` becomes `plan_<code>.md` (e.g. `plan_zh.md` for Chinese, `plan_ko.md` for Korean)
+- `docs/my-plan.md` becomes `docs/my-plan_<code>.md`
+- `output` (no extension) becomes `output_<code>`
 
-The `_zh` file contains a full Chinese translation of the English plan. All identifiers (`AC-*`, task IDs, file paths, API names, command flags) remain unchanged, as they are language-neutral.
+The translated variant file contains a full translation of the main plan file's current content in the configured language. All identifiers (`AC-*`, task IDs, file paths, API names, command flags) remain unchanged, as they are language-neutral.
 
-When `chinese_plan=false` (the default), or when `.humanize/config.json` does not exist, or when the `chinese_plan` field is absent, the `_zh` file is NOT written. A missing config file is not an error.
+When `alternative_plan_language` is empty, absent, set to `"English"`, or set to an unsupported language, no translated variant is written. Humanize does not auto-create `.humanize/config.json` when no project config file is present.

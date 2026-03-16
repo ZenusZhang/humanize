@@ -68,6 +68,7 @@ TEST_SUITES=(
     "test-stop-gate.sh"
     "test-templates-comprehensive.sh"
     "test-plan-file-hooks.sh"
+    "test-stop-hook-legacy-compat.sh"
     "test-error-scenarios.sh"
     "test-ansi-parsing.sh"
     "test-allowlist-validators.sh"
@@ -80,9 +81,11 @@ TEST_SUITES=(
     "test-monitor-e2e-deletion.sh"
     "test-monitor-e2e-sigint.sh"
     "test-gen-plan.sh"
+    "test-refine-plan.sh"
     "test-task-tag-routing.sh"
-    "test-bitlesson-workflow.sh"
-    "test-gen-batch-prompt.sh"
+    "test-config-merge.sh"
+    "test-config-error-handling.sh"
+    "test-unified-codex-config.sh"
     "test-pr-loop-1-scripts.sh"
     "test-pr-loop-2-hooks.sh"
     "test-pr-loop-3-stophook.sh"
@@ -90,9 +93,13 @@ TEST_SUITES=(
     # Session ID and Agent Teams tests
     "test-session-id.sh"
     "test-agent-teams.sh"
-    "test-worktree-teams.sh"
     # Ask Codex tests
     "test-ask-codex.sh"
+    "test-codex-worker.sh"
+    # Bitlesson routing tests
+    "test-bitlesson-select-routing.sh"
+    # Provider routing tests
+    "test-model-router.sh"
     # Skill monitor tests
     "test-skill-monitor.sh"
     # Robustness tests
@@ -253,8 +260,8 @@ for suite in "${TEST_SUITES[@]}"; do
         FAILED_SUITES+=("$suite")
         line=$(echo -e "${RED}FAILED${NC}: $suite (exit code: $exit_code, failed: $failed, ${elapsed_display})")
         printf '%d\t%s\n' "$elapsed_ms" "$line" >> "$SORT_FILE"
-        # Save failure detail for later display
-        echo "$output" | tail -30 > "$OUTPUT_DIR/${safe_name}.detail"
+        # Preserve the full suite log so CI surfaces the exact failing assertion.
+        printf '%s\n' "$output" > "$OUTPUT_DIR/${safe_name}.detail"
     else
         zsh_label=""
         needs_zsh "$suite" && zsh_label=" (zsh)"

@@ -25,9 +25,9 @@ set -euo pipefail
 # Default Configuration
 # ========================================
 
-# Override defaults before sourcing loop-common.sh when PR loop needs custom values
-DEFAULT_CODEX_MODEL="gpt-5.4"
-DEFAULT_CODEX_EFFORT="xhigh"
+# Override effort before sourcing loop-common.sh (PR loop defaults to medium effort).
+# codex_model is NOT pre-set here so that config-backed values from loop-common.sh apply.
+DEFAULT_CODEX_EFFORT="medium"
 DEFAULT_CODEX_TIMEOUT=900
 DEFAULT_POLL_INTERVAL=30
 DEFAULT_POLL_TIMEOUT=900  # 15 minutes per bot

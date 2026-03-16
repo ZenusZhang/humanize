@@ -145,11 +145,11 @@ EOF
 
     local loop_dir="$repo_dir/.humanize/rlcr/2024-02-01_12-00-00"
     mkdir -p "$loop_dir"
+    # codex_model is intentionally omitted; the stop hook derives it from config defaults
     cat > "$loop_dir/state.md" << EOF
 ---
 current_round: 0
 max_iterations: 10
-codex_model: gpt-5.4
 codex_effort: xhigh
 codex_timeout: 5400
 push_every_round: false

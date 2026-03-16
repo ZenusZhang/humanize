@@ -20,18 +20,14 @@ If you feel the urge to implement something directly, STOP and delegate it to a 
 
 ### Guidelines
 
-1. **Task Splitting**: Break work into independent tasks that can be worked on in parallel without file conflicts. Each task should have clear scope and acceptance criteria.
-2. **Cold Start**: Treat each `/humanize:codex-worker` invocation as a cold start. Provide: goal, constraints, file ownership boundaries, and concrete acceptance criteria.
-3. **File Conflict Prevention**: Two worker runs changing the same file in parallel causes silent overwrites. Assign strict file ownership boundaries. If overlap is required, enforce order via `blockedBy`.
-4. **Coordination**: Track progress via the Task system (TaskCreate/TaskUpdate/TaskList) and/or the doc-based Parallelization Matrix. Resolve discovered dependencies early.
-5. **Quality**: Verify worker output before considering tasks complete. Confirm changes match requirements, do not conflict, and have validation evidence.
-6. **Commits**: Prefer one focused commit per work package (per worktree lane when using worktrees). Keep commit messages specific to the change set.
-7. **Plan Approval**: For high-risk tasks, require a short plan before running the worker.
-8. **BitLesson Discipline**: Require running `bitlesson-selector` before each sub-task (invoke via `scripts/bitlesson-select.sh` (preferred; runs `codex exec -m gpt-5.4 -c model_reasoning_effort=xhigh`) or the `bitlesson-selector` agent) and record selected lesson IDs (or `NONE`) in the work notes.
-9. **Worker Model Default**: When invoking `/humanize:codex-worker`, keep the default `gpt-5.4:xhigh` unless there's a concrete reason to override.
-10. **Cross-Vendor Review Context (MANDATORY)**: In every worker/analyzer/reviewer prompt, include one explicit sentence stating the cross-vendor-style relationship:
-    - worker task: "Your output will be reviewed independently (cross-vendor style) by a separate analyzer/reviewer."
-    - analyzer/reviewer task: "You are reviewing findings/results produced by an independent implementation worker (cross-vendor style)."
+1. **Task Splitting**: Break work into independent tasks that can be worked on in parallel without file conflicts. Each task should have clear scope and acceptance criteria. Aim for 5-6 tasks per teammate to keep everyone productive and allow reassignment if someone gets stuck.
+2. **Cold Start**: Every team member starts with zero prior context (they do NOT inherit your conversation history). However, they DO automatically load project-level CLAUDE.md files and MCP servers. When spawning members, focus on providing: the implementation plan or relevant goals, specific file paths they need to work on, what has been done so far, and what exactly needs to be accomplished. Do not repeat what CLAUDE.md already covers.
+3. **File Conflict Prevention**: Two teammates editing the same file causes silent overwrites, not merge conflicts - one teammate's work will be completely lost. Assign strict file ownership boundaries. If two tasks must touch the same file, sequence them with task dependencies (blockedBy) so they never run in parallel.
+4. **Coordination**: Track team member progress via TaskList and resolve any discovered dependencies. If a member is blocked or stuck, help unblock them or reassign the work to another member.
+5. **Quality**: Review team member output before considering tasks complete. Verify that changes are correct, do not conflict with other members' work, and meet the acceptance criteria.
+6. **Commits**: Each team member should commit their own changes. You coordinate the overall commit strategy and ensure all commits are properly sequenced.
+7. **Plan Approval**: For high-risk or architecturally significant tasks, consider requiring teammates to plan before implementing (using plan mode). Review and approve their plans before they proceed.
+8. **BitLesson Discipline**: Require running `bitlesson-selector` before each sub-task and record selected lesson IDs (or `NONE`) in the work notes.
 
 ### Important
 

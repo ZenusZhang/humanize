@@ -14,9 +14,9 @@ set -euo pipefail
 # Default Configuration
 # ========================================
 
-# Override defaults before sourcing loop-common.sh when PR loop needs custom values
-DEFAULT_CODEX_MODEL="gpt-5.4"
-DEFAULT_CODEX_EFFORT="xhigh"
+# Override effort before sourcing loop-common.sh (PR loop defaults to medium effort).
+# codex_model is NOT pre-set here so that config-backed values from loop-common.sh apply.
+DEFAULT_CODEX_EFFORT="medium"
 DEFAULT_CODEX_TIMEOUT=900
 DEFAULT_MAX_ITERATIONS=42
 
@@ -69,7 +69,7 @@ BOT FLAGS (at least one required):
 OPTIONS:
   --max <N>            Maximum iterations before auto-stop (default: 42)
   --codex-model <MODEL:EFFORT>
-                       Codex model and reasoning effort (default: gpt-5.4:xhigh)
+                       Codex model and reasoning effort (default from config, effort: medium)
   --codex-timeout <SECONDS>
                        Timeout for each Codex review in seconds (default: 900)
   -h, --help           Show this help message

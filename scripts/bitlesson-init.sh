@@ -8,7 +8,7 @@ Usage:
   bitlesson-init.sh --project-root <dir> --template <path> [--bitlesson-relpath <relpath>]
 
 Behavior:
-  - Default bitlesson-relpath: bitlesson.md
+  - Default bitlesson-relpath: .humanize/bitlesson.md
   - Creates <project-root>/<bitlesson-relpath> from template if missing
   - Does not overwrite existing file
   - Prints the resolved bitlesson file path to stdout on success
@@ -17,7 +17,7 @@ USAGE_EOF
 
 PROJECT_ROOT=""
 TEMPLATE_PATH=""
-BITLESSON_RELPATH="bitlesson.md"
+BITLESSON_RELPATH=".humanize/bitlesson.md"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -64,6 +64,11 @@ fi
 
 if [[ ! -f "$TEMPLATE_PATH" ]]; then
     echo "Error: --template must be an existing file: $TEMPLATE_PATH" >&2
+    exit 1
+fi
+
+if [[ "$BITLESSON_RELPATH" = /* ]] || [[ "$BITLESSON_RELPATH" =~ (^|/)\.\.(/|$) ]]; then
+    echo "Error: --bitlesson-relpath must be a relative path without '..': $BITLESSON_RELPATH" >&2
     exit 1
 fi
 
