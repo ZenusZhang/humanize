@@ -9,7 +9,6 @@ allowed-tools:
   - "Write"
   - "Edit"
   - "AskUserQuestion"
-hide-from-slash-command-tool: "true"
 ---
 
 # Refine Annotated Plan

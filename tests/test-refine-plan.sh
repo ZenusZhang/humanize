@@ -669,7 +669,11 @@ if [[ -f "$REFINE_PLAN_CMD" ]]; then
     assert_file_contains "$REFINE_PLAN_CMD" 'argument-hint: "--input <path/to/annotated-plan.md> [--output <path/to/refined-plan.md>] [--qa-dir <path/to/qa-dir>] [--alt-language <language-or-code>] [--discussion|--direct]"' "refine-plan.md exposes expected argument hint"
     assert_file_contains "$REFINE_PLAN_CMD" '"Bash(${CLAUDE_PLUGIN_ROOT}/scripts/validate-refine-plan-io.sh:*)"' "refine-plan.md allowlist includes validate-refine-plan-io.sh"
     assert_file_contains "$REFINE_PLAN_CMD" '"AskUserQuestion"' "refine-plan.md allows AskUserQuestion for discussion mode"
-    assert_file_contains "$REFINE_PLAN_CMD" 'hide-from-slash-command-tool: "true"' "refine-plan.md is hidden from slash command tool"
+    if ! grep -qF 'hide-from-slash-command-tool:' "$REFINE_PLAN_CMD"; then
+        pass "refine-plan.md is visible in slash command tool"
+    else
+        fail "refine-plan.md is visible in slash command tool" "no hide-from-slash-command-tool frontmatter" "hide-from-slash-command-tool still present"
+    fi
     assert_file_contains "$REFINE_PLAN_CMD" "Read and execute below with ultrathink." "refine-plan.md requires ultrathink execution mode"
 fi
 
